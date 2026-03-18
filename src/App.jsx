@@ -1,6 +1,3 @@
-Meal planner v6 · JSX
-Copy
-
 import { useState, useEffect, useRef } from "react";
  
 // ─── Design System — Alexa Light Mode ────────────────────────────────────────
