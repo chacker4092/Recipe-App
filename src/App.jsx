@@ -271,7 +271,12 @@ function buildGroceriesWithPortions(plan, portionSizes = {}) {
 
 // ─── Anthropic API ────────────────────────────────────────────────────────────
 async function callClaude(messages, maxTokens = 1500) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  // Use local proxy to avoid CORS issues when deployed
+  const endpoint = window.location.hostname === "localhost"
+    ? "https://api.anthropic.com/v1/messages"
+    : "/api/claude";
+
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
