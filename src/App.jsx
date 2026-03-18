@@ -1,5 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+Meal planner v6 · JSX
+Copy
 
+import { useState, useEffect, useRef } from "react";
+ 
 // ─── Design System — Alexa Light Mode ────────────────────────────────────────
 const A = {
   // Backgrounds — Alexa app light: pure white base, very light grey surfaces
@@ -24,7 +27,7 @@ const A = {
   red:   "#C0392B",
 };
 const FONT = "'Amazon Ember','Public Sans',system-ui,sans-serif";
-
+ 
 if (typeof document !== "undefined") {
   if (!document.getElementById("mp-style")) {
     const s = document.createElement("style");
@@ -39,15 +42,15 @@ if (typeof document !== "undefined") {
     document.head.appendChild(s);
   }
 }
-
+ 
 const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-
+ 
 const METHOD_META = {
   crockpot:{ label:"Crockpot",    emoji:"🥘", color:"#C05A3A", bg:"#FBF0EC" },
   sheetpan:{ label:"Sheet Pan",   emoji:"🍳", color:"#D4600A", bg:"#FEF3EB" },
   instapot:{ label:"Instant Pot", emoji:"⚡", color:"#0077B6", bg:"#E6F2FA" },
 };
-
+ 
 // Grocery categories for grouping
 const GROCERY_CATS = [
   { name:"🥩 Meat & Protein",   test: i => /chicken|turkey|salmon|beef|pork|shrimp|tuna|fish|lamb|sausage|bacon|egg|tofu/i.test(i) },
@@ -58,7 +61,7 @@ const GROCERY_CATS = [
   { name:"❄️ Frozen",           test: i => /frozen/i.test(i) },
   { name:"🛒 Other",            test: () => true },
 ];
-
+ 
 // ─── Seed Meals (with full amounts on every ingredient) ───────────────────────
 const SEED_MEALS = [
   { id:"s1", name:"Crockpot Honey Garlic Chicken", method:"crockpot", toddlerFriendly:true, protein:"Chicken",
@@ -74,7 +77,7 @@ const SEED_MEALS = [
       "Remove chicken and shred. Mix cornstarch with 2 tbsp cold water, stir into sauce, cook HIGH 15 min more.",
       "Serve shredded chicken over jasmine rice."],
     groceries:["2 lbs chicken thighs","⅓ cup honey","¼ cup low-sodium soy sauce","4 garlic cloves","2 tbsp ketchup","1 tbsp cornstarch","2 cups jasmine rice"] },
-
+ 
   { id:"s2", name:"Sheet Pan Salmon & Veggies", method:"sheetpan", toddlerFriendly:false, protein:"Salmon",
     source:"builtin", recipeUrl:"", cookTime:"25 min", servings:4,
     ingredients:[
@@ -88,7 +91,7 @@ const SEED_MEALS = [
       "Roast 18–22 min until salmon flakes easily with a fork.",
       "Serve immediately."],
     groceries:["4 salmon fillets (6 oz each)","2 cups broccoli florets","1 cup cherry tomatoes","1 bunch asparagus","3 tbsp olive oil","1 lemon","4 garlic cloves"] },
-
+ 
   { id:"s3", name:"Instant Pot Turkey Meatball Soup", method:"instapot", toddlerFriendly:true, protein:"Turkey",
     source:"builtin", recipeUrl:"", cookTime:"30 min", servings:6,
     ingredients:[
@@ -103,7 +106,7 @@ const SEED_MEALS = [
       "Add broth, noodles, meatballs, and remaining Italian seasoning.",
       "Seal and pressure cook HIGH 8 min. Quick release. Serve topped with Parmesan."],
     groceries:["1 lb ground turkey","1 egg","¼ cup breadcrumbs","6 cups chicken broth","2 cups egg noodles","3 carrots","3 celery stalks","1 onion","Italian seasoning","Parmesan cheese"] },
-
+ 
   { id:"s4", name:"Sheet Pan Chicken Thighs & Sweet Potato", method:"sheetpan", toddlerFriendly:true, protein:"Chicken",
     source:"builtin", recipeUrl:"", cookTime:"40 min", servings:4,
     ingredients:[
@@ -117,7 +120,7 @@ const SEED_MEALS = [
       "Nestle chicken among sweet potatoes. Lay rosemary sprigs on top.",
       "Roast 35–40 min until chicken is golden and internal temp reaches 165°F."],
     groceries:["6 bone-in chicken thighs","2 large sweet potatoes","2 tbsp olive oil","smoked paprika","garlic powder","fresh rosemary"] },
-
+ 
   { id:"s5", name:"Crockpot Turkey Chili", method:"crockpot", toddlerFriendly:true, protein:"Turkey",
     source:"builtin", recipeUrl:"", cookTime:"6 hrs", servings:6,
     ingredients:[
@@ -132,7 +135,7 @@ const SEED_MEALS = [
       "Taste and adjust seasoning.",
       "Serve topped with sour cream and shredded cheddar."],
     groceries:["1.5 lbs ground turkey","2 cans kidney beans","2 cans diced tomatoes","1 packet chili seasoning","1 cup frozen corn","1 bell pepper","1 onion","sour cream","shredded cheddar cheese"] },
-
+ 
   { id:"s6", name:"Instant Pot Mac & Cheese (Hidden Veggies)", method:"instapot", toddlerFriendly:true, protein:"None",
     source:"builtin", recipeUrl:"", cookTime:"20 min", servings:4,
     ingredients:[
@@ -148,10 +151,10 @@ const SEED_MEALS = [
       "Fold in shredded cheddar until fully melted. Season with pepper to taste."],
     groceries:["1 lb elbow pasta","2 cups cauliflower florets","2 cups sharp cheddar cheese","½ cup whole milk","2 tbsp butter","2 oz cream cheese","mustard powder"] },
 ];
-
+ 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function shuffle(arr) { return [...arr].sort(()=>Math.random()-0.5); }
-
+ 
 function parseFraction(str) {
   str = str.trim();
   const mixed = str.match(/^(\d+)\s+(\d+)\/(\d+)$/);
@@ -160,7 +163,7 @@ function parseFraction(str) {
   if (frac) return parseInt(frac[1]) / parseInt(frac[2]);
   return parseFloat(str) || 0;
 }
-
+ 
 function scaleIngredient(text, mult) {
   if (mult === 1) return text;
   return text.replace(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d*\.?\d+)/, (match) => {
@@ -178,9 +181,9 @@ function scaleIngredient(text, mult) {
   });
 }
 // ─── Grocery math helpers ────────────────────────────────────────────────────
-
+ 
 const UNI_FRACS = {"⅛":0.125,"¼":0.25,"⅓":0.333,"⅜":0.375,"½":0.5,"⅝":0.625,"⅔":0.667,"¾":0.75,"⅞":0.875};
-
+ 
 function parseQty(s) {
   if (!s) return 0;
   s = s.trim().replace(/[⅛¼⅓⅜½⅝⅔¾⅞]/g, m => " "+UNI_FRACS[m]);
@@ -190,7 +193,7 @@ function parseQty(s) {
   if (frac) return parseInt(frac[1]) / parseInt(frac[2]);
   return parseFloat(s) || 0;
 }
-
+ 
 function fmtQty(n) {
   if (!n) return "";
   const FRACS = [[0.125,"⅛"],[0.25,"¼"],[0.333,"⅓"],[0.375,"⅜"],[0.5,"½"],[0.625,"⅝"],[0.667,"⅔"],[0.75,"¾"],[0.875,"⅞"]];
@@ -199,10 +202,10 @@ function fmtQty(n) {
   const r = Math.round(n*100)/100;
   return r===Math.floor(r) ? String(Math.floor(r)) : r.toFixed(2).replace(/\.?0+$/,"");
 }
-
+ 
 // Units must match as whole words to avoid "l" matching "lemon", "g" matching "garlic"
 const UNIT_RE = /^(lbs?|oz|cups?|tbsps?|tsps?|kg|ml|cans?|bunche?s?|cloves?|sprigs?|packets?|slices?|stalks?|fillets?|heads?|pieces?|pounds?|ounces?)/i;
-
+ 
 function parseIngredient(raw) {
   let s = raw.trim();
   // 1. Pull leading quantity
@@ -219,14 +222,14 @@ function parseIngredient(raw) {
              .replace(/\s+/g," ").trim();
   return { qty, unit, name };
 }
-
+ 
 function ingredientKey(raw) {
   return parseIngredient(raw).name;
 }
-
+ 
 function buildGroceriesWithPortions(plan, portionSizes = {}) {
   const acc = {}; // key → { qty, unit, name, rawName }
-
+ 
   Object.entries(plan).forEach(([day, m]) => {
     if (!m?.groceries) return;
     const mult = portionSizes[day] || 1;
@@ -243,11 +246,11 @@ function buildGroceriesWithPortions(plan, portionSizes = {}) {
       }
     });
   });
-
+ 
   // Format and categorise
   const categorised = {};
   GROCERY_CATS.forEach(cat => { categorised[cat.name] = []; });
-
+ 
   Object.values(acc).forEach(({ qty, unit, name, rawName }) => {
     let label;
     if (qty === 0) {
@@ -261,21 +264,21 @@ function buildGroceriesWithPortions(plan, portionSizes = {}) {
     const cat = GROCERY_CATS.find(c => c.test(label));
     categorised[cat.name].push(label);
   });
-
+ 
   Object.keys(categorised).forEach(k => {
     categorised[k].sort();
     if (categorised[k].length === 0) delete categorised[k];
   });
   return categorised;
 }
-
+ 
 // ─── Anthropic API ────────────────────────────────────────────────────────────
 async function callClaude(messages, maxTokens = 1500) {
   // Use local proxy to avoid CORS issues when deployed
   const endpoint = window.location.hostname === "localhost"
     ? "https://api.anthropic.com/v1/messages"
     : "/api/claude";
-
+ 
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -305,7 +308,7 @@ async function callClaude(messages, maxTokens = 1500) {
   if (!text) throw new Error(`Empty response. Keys: ${Object.keys(data).join(",")}`);
   return text;
 }
-
+ 
 function extractJSON(raw) {
   if (!raw || typeof raw !== "string") throw new Error("No response text");
   // Strip markdown code fences
@@ -342,12 +345,12 @@ function extractJSON(raw) {
     throw new Error(`JSON parse failed: ${e.message}`);
   }
 }
-
+ 
 async function fetchAIMeals(excludeNames = []) {
   const prompt = `You are a helpful meal planner. Generate exactly 7 dinner recipes for a family: 2 adults + 1 toddler (age 2-3). Meals must be healthy, mild flavour, easy weeknight-friendly.
 Cooking methods allowed: Crockpot, Sheet Pan, or Instant Pot ONLY.
 Do NOT repeat these meals: ${excludeNames.slice(0,10).join(", ") || "none"}.
-
+ 
 Return ONLY a valid JSON array with exactly this structure — no explanation, no markdown:
 [
   {
@@ -362,13 +365,13 @@ Return ONLY a valid JSON array with exactly this structure — no explanation, n
     "groceries": ["2 lbs chicken thighs", "1 cup honey", "3 garlic cloves"]
   }
 ]
-
+ 
 Rules:
 - method must be exactly "crockpot", "sheetpan", or "instapot"
 - Every ingredient must have a quantity and unit (e.g. "2 tbsp olive oil", not just "olive oil")
 - servings must be a number (4)
 - Return exactly 7 recipes`;
-
+ 
   const text = await callClaude([{ role: "user", content: prompt }], 2800);
   const meals = extractJSON(text);
   if (!Array.isArray(meals)) throw new Error("Not array");
@@ -380,36 +383,36 @@ Rules:
     servings: Number(m.servings) || 4,
   }));
 }
-
+ 
 async function fetchSingleAIMeal(excludeNames = []) {
   const prompt = `Generate exactly 1 dinner recipe for a family: 2 adults + 1 toddler. Healthy, mild, weeknight-friendly.
 Cooking method: Crockpot, Sheet Pan, or Instant Pot ONLY.
 Do NOT use: ${excludeNames.slice(0,10).join(", ") || "none"}.
-
+ 
 Return ONLY valid JSON — no explanation:
 {"name":"...","method":"crockpot","toddlerFriendly":true,"protein":"Chicken","cookTime":"6 hrs","servings":4,"ingredients":["2 lbs chicken thighs","1 cup honey"],"instructions":["Step 1.","Step 2."],"groceries":["2 lbs chicken thighs","1 cup honey"]}
-
+ 
 Every ingredient must have a quantity and unit.`;
   const text = await callClaude([{ role: "user", content: prompt }], 800);
   const meal = extractJSON(text);
   return { ...meal, id: `ai_${Date.now()}`, source: "ai", recipeUrl: "", servings: Number(meal.servings) || 4 };
 }
-
+ 
 async function fetchRecipeFromUrl(url) {
   // Extract recipe keywords from URL path for context
   const slug = url.replace(/https?:\/\/[^/]+/,"").replace(/[^a-z0-9]+/gi," ").trim();
   const prompt = `Create a family-friendly dinner recipe inspired by this URL: ${url}
 URL keywords: "${slug}"
-
+ 
 Use the keywords to infer the recipe name and style. Respond with ONLY this JSON object (no explanation, no markdown):
 {"name":"Recipe Name Here","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken thighs","3 tbsp olive oil","1 tsp garlic powder"],"instructions":["Step 1.","Step 2.","Step 3."],"groceries":["2 lbs chicken thighs","3 tbsp olive oil","1 tsp garlic powder"]}
-
+ 
 Rules:
 - method must be exactly one of: "crockpot", "sheetpan", or "instapot"
 - Every ingredient must include quantity + unit
 - servings must be a plain number
 - Start your response with { and end with }`;
-
+ 
   const text = await callClaude([{ role: "user", content: prompt }], 1000);
   let meal;
   try { meal = extractJSON(text); }
@@ -417,7 +420,7 @@ Rules:
   if (!["crockpot","sheetpan","instapot"].includes(meal.method)) meal.method = "sheetpan";
   return { ...meal, id: `custom_${Date.now()}`, source: "custom", recipeUrl: url, servings: Number(meal.servings) || 4 };
 }
-
+ 
 // Extract visible text from image using a canvas + DOM approach
 async function extractTextFromImage(dataUrl) {
   return new Promise((resolve) => {
@@ -443,19 +446,19 @@ async function extractTextFromImage(dataUrl) {
     img.src = dataUrl;
   });
 }
-
+ 
 async function fetchRecipeFromImage(base64Data, mimeType) {
   if (!base64Data || base64Data.length < 50) throw new Error("Image data missing — please try again");
-
+ 
   // Try vision API first (multimodal message with image block)
   const safeMime = ["image/jpeg","image/png","image/gif","image/webp"].includes(mimeType) ? mimeType : "image/jpeg";
   const jsonPrompt = `Extract this recipe into JSON. Return ONLY the JSON object, nothing else:
 {"name":"Recipe Name","method":"sheetpan","toddlerFriendly":false,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken breast","1 tsp salt"],"instructions":["Step 1.","Step 2."],"groceries":["2 lbs chicken breast","1 tsp salt"]}
 Rules: method must be "crockpot","sheetpan", or "instapot". Every ingredient needs quantity+unit. servings is a number. Start response with {`;
-
+ 
   let text = "";
   let usedVision = false;
-
+ 
   try {
     text = await callClaude([{
       role: "user",
@@ -468,7 +471,7 @@ Rules: method must be "crockpot","sheetpan", or "instapot". Every ingredient nee
   } catch(visionErr) {
     // Vision failed — fall through to text-only path
   }
-
+ 
   // If vision call returned something but it has no JSON, or failed entirely,
   // fall back to asking Claude to invent a recipe based on image description
   let hasJSON = text && (text.includes("{") || text.includes("["));
@@ -479,7 +482,7 @@ Return ONLY this JSON (no explanation):
 {"name":"Honey Garlic Chicken Thighs","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"35 min","servings":4,"ingredients":["2 lbs chicken thighs","3 tbsp honey","2 tbsp soy sauce","3 garlic cloves minced","1 tbsp olive oil"],"instructions":["Preheat oven to 425F.","Mix honey, soy sauce, garlic.","Coat chicken and bake 35 min."],"groceries":["2 lbs chicken thighs","3 tbsp honey","2 tbsp soy sauce","3 garlic cloves","1 tbsp olive oil"]}`;
     text = await callClaude([{ role: "user", content: fallbackPrompt }], 1000);
   }
-
+ 
   let meal;
   try {
     meal = extractJSON(text);
@@ -490,10 +493,10 @@ Return ONLY this JSON (no explanation):
   if (!["crockpot","sheetpan","instapot"].includes(meal.method)) meal.method = "sheetpan";
   return { ...meal, id: `photo_${Date.now()}`, source: "custom", recipeUrl: "", servings: Number(meal.servings) || 4 };
 }
-
+ 
 // ─── In-memory store ──────────────────────────────────────────────────────────
 const store = { _d: {}, get: k => store._d[k], set: (k,v) => { store._d[k] = v; } };
-
+ 
 // ─── UI Primitives ────────────────────────────────────────────────────────────
 function Pill({ children, color, bg, size=11 }) {
   return (
@@ -503,7 +506,7 @@ function Pill({ children, color, bg, size=11 }) {
     </span>
   );
 }
-
+ 
 function Sheet({ onClose, children, title }) {
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:900,display:"flex",alignItems:"flex-end"}}>
@@ -515,7 +518,7 @@ function Sheet({ onClose, children, title }) {
     </div>
   );
 }
-
+ 
 function Modal({ onClose, children }) {
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -525,7 +528,7 @@ function Modal({ onClose, children }) {
     </div>
   );
 }
-
+ 
 function StarRating({ value, onChange, size=26 }) {
   const [hov, setHov] = useState(0);
   return (
@@ -541,7 +544,7 @@ function StarRating({ value, onChange, size=26 }) {
     </div>
   );
 }
-
+ 
 // ─── Recipe Size Picker ────────────────────────────────────────────────────────
 function SizePicker({ value, onChange }) {
   const opts = [{ label:"½x", val:0.5 },{ label:"1x", val:1 },{ label:"2x", val:2 }];
@@ -558,7 +561,7 @@ function SizePicker({ value, onChange }) {
     </div>
   );
 }
-
+ 
 // ─── Recipe Sheet ─────────────────────────────────────────────────────────────
 function RecipeSheet({ meal, onClose, onEdit }) {
   const [size, setSize] = useState(1);
@@ -566,7 +569,7 @@ function RecipeSheet({ meal, onClose, onEdit }) {
   const meta = METHOD_META[meal.method] || METHOD_META.sheetpan;
   const baseServings = Number(meal.servings) || 4;
   const scaledServings = Math.round(baseServings * size);
-
+ 
   return (
     <Sheet onClose={onClose}>
       <div style={{padding:"16px 20px 36px"}}>
@@ -585,7 +588,7 @@ function RecipeSheet({ meal, onClose, onEdit }) {
             <button onClick={onClose} style={{background:A.surface3,border:"none",borderRadius:"50%",width:34,height:34,cursor:"pointer",fontSize:18,color:A.textSecondary}}>×</button>
           </div>
         </div>
-
+ 
         {/* Recipe photo if present */}
         {meal.photoDataUrl&&(
           <div style={{borderRadius:14,overflow:"hidden",marginBottom:14}}>
@@ -593,7 +596,7 @@ function RecipeSheet({ meal, onClose, onEdit }) {
               style={{width:"100%",maxHeight:200,objectFit:"cover",display:"block"}}/>
           </div>
         )}
-
+ 
         {/* Tags */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
           <Pill color={meta.color} bg={meta.bg}>{meta.emoji} {meta.label}</Pill>
@@ -601,7 +604,7 @@ function RecipeSheet({ meal, onClose, onEdit }) {
           {meal.cookTime&&<Pill color={A.textSecondary} bg={A.surface3}>⏱ {meal.cookTime}</Pill>}
           {meal.source==="custom"&&<Pill color={A.teal} bg={A.tealSoft}>🔗 Custom</Pill>}
         </div>
-
+ 
         {/* Size picker */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:A.surface2,borderRadius:12,padding:"12px 16px",marginBottom:16}}>
           <div>
@@ -613,14 +616,14 @@ function RecipeSheet({ meal, onClose, onEdit }) {
           </div>
           <SizePicker value={size} onChange={setSize}/>
         </div>
-
+ 
         {meal.recipeUrl&&(
           <a href={meal.recipeUrl} target="_blank" rel="noreferrer"
             style={{display:"block",padding:"12px 16px",background:A.tealSoft,borderRadius:12,fontSize:13,color:A.teal,textDecoration:"none",fontWeight:600,marginBottom:16}}>
             🔗 View Original Recipe →
           </a>
         )}
-
+ 
         {/* Ingredients */}
         <div style={{marginBottom:20}}>
           <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>
@@ -633,7 +636,7 @@ function RecipeSheet({ meal, onClose, onEdit }) {
             </div>
           ))}
         </div>
-
+ 
         {/* Instructions */}
         <div>
           <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Instructions</div>
@@ -648,7 +651,7 @@ function RecipeSheet({ meal, onClose, onEdit }) {
     </Sheet>
   );
 }
-
+ 
 // ─── Edit Recipe Modal ─────────────────────────────────────────────────────────
 function EditRecipeModal({ meal, onSave, onClose }) {
   const [draft, setDraft] = useState({
@@ -659,7 +662,7 @@ function EditRecipeModal({ meal, onSave, onClose }) {
   });
   const [photoDataUrl, setPhotoDataUrl] = useState(meal.photoDataUrl || null);
   const [photoReady, setPhotoReady]     = useState(!!meal.photoDataUrl);
-
+ 
   const loadPhoto = (file) => {
     if (!file) return;
     setPhotoReady(false);
@@ -667,12 +670,12 @@ function EditRecipeModal({ meal, onSave, onClose }) {
     reader.onload = (e) => { setPhotoDataUrl(e.target.result); setPhotoReady(true); };
     reader.readAsDataURL(file);
   };
-
+ 
   const updateField   = (k,v)    => setDraft(d=>({...d,[k]:v}));
   const updateListItem = (list,i,v) => setDraft(d=>({...d,[list]:d[list].map((x,j)=>j===i?v:x)}));
   const addListItem   = (list)   => setDraft(d=>({...d,[list]:[...d[list],""]}));
   const removeListItem = (list,i) => setDraft(d=>({...d,[list]:d[list].filter((_,j)=>j!==i)}));
-
+ 
   const handleSave = () => {
     // Sync groceries to match ingredients (in case user only edited ingredients)
     const updated = {
@@ -682,14 +685,14 @@ function EditRecipeModal({ meal, onSave, onClose }) {
     };
     onSave(updated);
   };
-
+ 
   const inputStyle = {
     width:"100%", background:A.surface3, border:`1px solid ${A.border}`,
     borderRadius:8, padding:"8px 12px", fontSize:13, color:A.textPrimary,
     outline:"none", fontFamily:"inherit", boxSizing:"border-box",
   };
   const rowStyle = { display:"flex", gap:8, alignItems:"flex-start", marginBottom:6 };
-
+ 
   return (
     <Modal onClose={onClose}>
       <div style={{padding:"20px 20px 28px"}}>
@@ -698,7 +701,7 @@ function EditRecipeModal({ meal, onSave, onClose }) {
           <div style={{fontSize:18,fontWeight:700,color:A.textPrimary}}>Edit Recipe</div>
           <button onClick={onClose} style={{background:A.surface3,border:"none",borderRadius:"50%",width:34,height:34,cursor:"pointer",fontSize:18,color:A.textSecondary}}>×</button>
         </div>
-
+ 
         {/* Photo */}
         <div style={{marginBottom:16}}>
           <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Recipe Photo</div>
@@ -722,13 +725,13 @@ function EditRecipeModal({ meal, onSave, onClose }) {
             </label>
           )}
         </div>
-
+ 
         {/* Name */}
         <div style={{marginBottom:14}}>
           <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Recipe Name</div>
           <input value={draft.name||""} onChange={e=>updateField("name",e.target.value)} style={inputStyle}/>
         </div>
-
+ 
         {/* Method + Cook Time row */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
           <div>
@@ -745,7 +748,7 @@ function EditRecipeModal({ meal, onSave, onClose }) {
             <input value={draft.cookTime||""} onChange={e=>updateField("cookTime",e.target.value)} placeholder="e.g. 30 min" style={inputStyle}/>
           </div>
         </div>
-
+ 
         {/* Servings + Toddler row */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
           <div>
@@ -762,7 +765,7 @@ function EditRecipeModal({ meal, onSave, onClose }) {
             <span style={{fontSize:12,color:A.textSecondary,fontWeight:500}}>🐣 Toddler OK</span>
           </div>
         </div>
-
+ 
         {/* Ingredients */}
         <div style={{marginBottom:18}}>
           <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Ingredients</div>
@@ -780,7 +783,7 @@ function EditRecipeModal({ meal, onSave, onClose }) {
             + Add Ingredient
           </button>
         </div>
-
+ 
         {/* Instructions */}
         <div style={{marginBottom:22}}>
           <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Instructions</div>
@@ -800,7 +803,7 @@ function EditRecipeModal({ meal, onSave, onClose }) {
             + Add Step
           </button>
         </div>
-
+ 
         <button onClick={handleSave}
           style={{width:"100%",padding:15,background:A.teal,color:"#fff",border:"none",borderRadius:12,
             fontSize:14,fontWeight:700,cursor:"pointer"}}>
@@ -810,7 +813,7 @@ function EditRecipeModal({ meal, onSave, onClose }) {
     </Modal>
   );
 }
-
+ 
 // ─── Manual Swap Sheet ────────────────────────────────────────────────────────
 function ManualSwapSheet({ day, allRecipes, currentMeal, onSwap, onClose }) {
   const [filter, setFilter] = useState("all");
@@ -821,7 +824,7 @@ function ManualSwapSheet({ day, allRecipes, currentMeal, onSwap, onClose }) {
     <Sheet onClose={onClose} title={`Swap ${day}`}>
       <div style={{padding:"12px 20px 32px"}}>
         <div style={{fontSize:12,color:A.textMuted,marginBottom:12}}>Current: <span style={{color:A.textSecondary}}>{currentMeal?.name}</span></div>
-
+ 
         {/* Filter pills */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
           {[["all","All"],["crockpot","🥘 Crockpot"],["sheetpan","🍳 Sheet Pan"],["instapot","⚡ Instant Pot"],["toddler","🐣 Toddler"]].map(([v,l])=>(
@@ -832,9 +835,9 @@ function ManualSwapSheet({ day, allRecipes, currentMeal, onSwap, onClose }) {
             </button>
           ))}
         </div>
-
+ 
         {filtered.length===0&&<div style={{color:A.textMuted,fontSize:13,padding:"20px 0",textAlign:"center"}}>No recipes match this filter.</div>}
-
+ 
         {filtered.map(meal=>{
           const meta = METHOD_META[meal.method]||METHOD_META.sheetpan;
           const isCurrent = currentMeal?.id === meal.id;
@@ -864,7 +867,7 @@ function ManualSwapSheet({ day, allRecipes, currentMeal, onSwap, onClose }) {
     </Sheet>
   );
 }
-
+ 
 // ─── Add Recipe Modal ─────────────────────────────────────────────────────────
 function AddRecipeModal({ onAdd, onClose }) {
   const [mode, setMode]     = useState("photo");
@@ -876,9 +879,9 @@ function AddRecipeModal({ onAdd, onClose }) {
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState("");
   const [preview, setPreview]       = useState(null);
-
+ 
   const resetPhoto = () => { setImgDataUrl(null); setImgMime("image/jpeg"); setImgReady(false); };
-
+ 
   const loadFile = (file) => {
     if (!file) return;
     setImgReady(false);
@@ -894,7 +897,7 @@ function AddRecipeModal({ onAdd, onClose }) {
     reader.onerror = () => setError("Could not read the image file. Please try again.");
     reader.readAsDataURL(file);
   };
-
+ 
   const extractUrl = async () => {
     if (!url.trim()) return;
     setLoading(true); setError(""); setPreview(null);
@@ -905,7 +908,7 @@ function AddRecipeModal({ onAdd, onClose }) {
     }
     setLoading(false);
   };
-
+ 
   const extractPhoto = async () => {
     if (!imgDataUrl || !imgReady) { setError("Image not ready — please try selecting it again."); return; }
     setLoading(true); setError(""); setPreview(null);
@@ -921,9 +924,9 @@ function AddRecipeModal({ onAdd, onClose }) {
     }
     setLoading(false);
   };
-
+ 
   const meta = preview && (METHOD_META[preview.method] || METHOD_META.sheetpan);
-
+ 
   return (
     <Modal onClose={onClose}>
       <div style={{padding:"20px 20px 28px"}}>
@@ -931,7 +934,7 @@ function AddRecipeModal({ onAdd, onClose }) {
           <div style={{fontSize:19,fontWeight:700,color:A.textPrimary}}>Add Recipe</div>
           <button onClick={onClose} style={{background:A.surface3,border:"none",borderRadius:"50%",width:34,height:34,cursor:"pointer",fontSize:18,color:A.textSecondary}}>×</button>
         </div>
-
+ 
         {/* Mode toggle */}
         <div style={{display:"flex",background:A.surface3,borderRadius:12,padding:3,marginBottom:20,gap:3}}>
           {[["photo","📸 Photo"],["url","🔗 Link"]].map(([m,l])=>(
@@ -942,14 +945,14 @@ function AddRecipeModal({ onAdd, onClose }) {
             </button>
           ))}
         </div>
-
+ 
         {/* ── PHOTO MODE ── */}
         {mode==="photo"&&!preview&&(
           <>
             <div style={{fontSize:13,color:A.textSecondary,marginBottom:14,lineHeight:1.6}}>
               Upload a photo or snap a picture of any recipe card, cookbook page, or screenshot.
             </div>
-
+ 
             {/* Upload / Camera — use label+input so file picker works natively */}
             {!imgDataUrl&&(
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
@@ -971,7 +974,7 @@ function AddRecipeModal({ onAdd, onClose }) {
                 </label>
               </div>
             )}
-
+ 
             {/* Preview using base64 data URL — works in sandboxed iframes */}
             {imgDataUrl&&(
               <div style={{marginBottom:14}}>
@@ -991,9 +994,9 @@ function AddRecipeModal({ onAdd, onClose }) {
                 </button>
               </div>
             )}
-
+ 
             {error&&<div style={{color:A.red,fontSize:12,marginBottom:10,lineHeight:1.5,padding:"8px 12px",background:"#FEF2F2",borderRadius:8}}>{error}</div>}
-
+ 
             <button onClick={extractPhoto} disabled={loading||!imgReady}
               style={{width:"100%",padding:15,border:"none",borderRadius:12,fontSize:14,fontWeight:700,
                 background:loading||!imgReady?A.surface3:A.teal,
@@ -1003,7 +1006,7 @@ function AddRecipeModal({ onAdd, onClose }) {
             </button>
           </>
         )}
-
+ 
         {/* ── URL MODE ── */}
         {mode==="url"&&!preview&&(
           <>
@@ -1023,7 +1026,7 @@ function AddRecipeModal({ onAdd, onClose }) {
             </button>
           </>
         )}
-
+ 
         {/* ── RESULT PREVIEW ── */}
         {preview&&(
           <>
@@ -1055,7 +1058,7 @@ function AddRecipeModal({ onAdd, onClose }) {
     </Modal>
   );
 }
-
+ 
 // ─── Rate Modal ────────────────────────────────────────────────────────────────
 function RateModal({ meal, existing, onSave, onClose }) {
   const [draft, setDraft] = useState(existing || { stars:0, note:"", wouldMakeAgain:null });
@@ -1069,7 +1072,7 @@ function RateModal({ meal, existing, onSave, onClose }) {
           </div>
           <button onClick={onClose} style={{background:A.surface3,border:"none",borderRadius:"50%",width:34,height:34,cursor:"pointer",fontSize:18,color:A.textSecondary}}>×</button>
         </div>
-
+ 
         <div style={{marginBottom:20}}>
           <div style={{fontSize:12,color:A.textSecondary,marginBottom:10,fontWeight:500}}>How did your family like it?</div>
           <StarRating value={draft.stars} onChange={s=>setDraft(d=>({...d,stars:s}))}/>
@@ -1077,7 +1080,7 @@ function RateModal({ meal, existing, onSave, onClose }) {
             {["","😕 Not great","😐 It was okay","😊 Pretty good","😍 Really liked it","🏆 Family favorite!"][draft.stars]}
           </div>}
         </div>
-
+ 
         <div style={{marginBottom:20}}>
           <div style={{fontSize:12,color:A.textSecondary,marginBottom:10,fontWeight:500}}>Make it again?</div>
           <div style={{display:"flex",gap:8}}>
@@ -1091,7 +1094,7 @@ function RateModal({ meal, existing, onSave, onClose }) {
             ))}
           </div>
         </div>
-
+ 
         <div style={{marginBottom:22}}>
           <div style={{fontSize:12,color:A.textSecondary,marginBottom:8,fontWeight:500}}>Notes <span style={{color:A.textMuted,fontWeight:400}}>(optional)</span></div>
           <textarea value={draft.note} onChange={e=>setDraft(d=>({...d,note:e.target.value}))}
@@ -1099,7 +1102,7 @@ function RateModal({ meal, existing, onSave, onClose }) {
             rows={3} style={{width:"100%",padding:"12px 14px",background:A.surface3,border:`1px solid ${A.border}`,
               borderRadius:12,fontSize:13,color:A.textPrimary,resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.5}}/>
         </div>
-
+ 
         <div style={{display:"flex",gap:10}}>
           <button onClick={onClose} style={{flex:1,padding:13,border:`1px solid ${A.border}`,borderRadius:12,background:"transparent",cursor:"pointer",fontSize:13,color:A.textSecondary}}>Cancel</button>
           <button onClick={()=>onSave(draft)} disabled={draft.stars===0}
@@ -1112,7 +1115,7 @@ function RateModal({ meal, existing, onSave, onClose }) {
     </Modal>
   );
 }
-
+ 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function MealPlanner() {
   const [plan, setPlan]               = useState({});
@@ -1143,9 +1146,9 @@ export default function MealPlanner() {
   const [editRecipe, setEditRecipe]   = useState(null);   // meal being edited
   const [manualItems, setManualItems] = useState([]);      // manually added grocery items
   const [manualInput, setManualInput] = useState("");
-
+ 
   const allRecipes = [...SEED_MEALS, ...myRecipes];
-
+ 
   useEffect(()=>{
     const d = store.get("data") || {};
     if (d.savedWeeks) setSavedWeeks(d.savedWeeks);
@@ -1153,10 +1156,10 @@ export default function MealPlanner() {
     if (d.ratings)    setRatings(d.ratings);
     generateWeek(false);
   }, []);
-
+ 
   const persist = (sw=savedWeeks, mr=myRecipes, rt=ratings) =>
     store.set("data", { savedWeeks:sw, myRecipes:mr, ratings:rt });
-
+ 
   const saveEditedRecipe = (updated) => {
     // Update in plan (any day using this recipe by id)
     const newPlan = Object.fromEntries(
@@ -1172,7 +1175,7 @@ export default function MealPlanner() {
     setEditRecipe(null);
     showToast("Recipe updated!");
   };
-
+ 
   // Rebuild grocery list whenever plan, skipped days, or portion sizes change
   useEffect(()=>{
     const activePlan = Object.fromEntries(
@@ -1180,16 +1183,16 @@ export default function MealPlanner() {
     );
     setGroceryCats(buildGroceriesWithPortions(activePlan, portionSizes));
   }, [plan, skippedDays, portionSizes]);
-
+ 
   const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(""), 2500); };
-
+ 
   const applyPlan = (p) => {
     setPlan(p);
     setSkippedDays({});
     setPortionSizes({});
     setChecked({});
   };
-
+ 
   const generateWeek = async (useAI = true) => {
     setLoading(true); setAiError(false);
     setLoadingMsg(useAI ? "Asking Claude for ideas..." : "Building your week...");
@@ -1213,7 +1216,7 @@ export default function MealPlanner() {
     }
     setLoading(false);
   };
-
+ 
   const swapWithAI = async (day) => {
     setSwappingDay(day);
     try {
@@ -1227,13 +1230,13 @@ export default function MealPlanner() {
     }
     setSwappingDay(null);
   };
-
+ 
   const swapManual = (day, meal) => {
     const newPlan = { ...plan, [day]: meal };
     applyPlan(newPlan);
     showToast(`${day} updated!`);
   };
-
+ 
   const swapDays = (dayA, dayB) => {
     if (!dayA || !dayB || dayA === dayB) return;
     const newPlan = { ...plan, [dayA]: plan[dayB], [dayB]: plan[dayA] };
@@ -1244,57 +1247,57 @@ export default function MealPlanner() {
     setChecked({});
     showToast(`${dayA} & ${dayB} swapped!`);
   };
-
+ 
   const saveWeek = () => {
     if (!saveName.trim()) return;
     const updated = { ...savedWeeks, [saveName.trim()]: { plan, savedAt: new Date().toLocaleDateString() }};
     setSavedWeeks(updated); persist(updated, myRecipes);
     setSaveModal(false); setSaveName(""); showToast(`Saved "${saveName.trim()}"`);
   };
-
+ 
   const loadWeek = (name) => {
     const w = savedWeeks[name]; if (!w) return;
     applyPlan(w.plan); setSavedSheet(false); setTab("plan"); showToast(`Loaded "${name}"`);
   };
-
+ 
   const deleteWeek = (name) => {
     const u = { ...savedWeeks }; delete u[name];
     setSavedWeeks(u); persist(u, myRecipes);
   };
-
+ 
   const addRecipe = (meal) => {
     const u = [...myRecipes, meal]; setMyRecipes(u); persist(savedWeeks, u, ratings);
     setAddModal(false); showToast(`Added "${meal.name}"`);
   };
-
+ 
   const deleteCustom = (id) => {
     const u = myRecipes.filter(m=>m.id!==id); setMyRecipes(u); persist(savedWeeks, u, ratings);
   };
-
+ 
   const saveRating = (draft) => {
     const u = { ...ratings, [rateModal.name]: draft };
     setRatings(u); persist(savedWeeks, myRecipes, u);
     setRateModal(null); showToast(`Rated "${rateModal.name}"`);
   };
-
+ 
   const avgRating = () => {
     const v = Object.values(ratings).map(r=>r.stars).filter(s=>s>0);
     return v.length ? (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1) : null;
   };
-
+ 
   const allGroceries = [...Object.values(groceryCats).flat(), ...manualItems];
   const unchecked = allGroceries.filter(i=>!checked[i]).length;
   const toddlerCount = Object.values(plan).filter(m=>m?.toddlerFriendly).length;
-
+ 
   const NAV = [
     { id:"plan",      icon:"🗓", label:"Meals" },
     { id:"groceries", icon:"🛒", label:`Shop${allGroceries.length?` (${unchecked})`:""}`},
     { id:"ratings",   icon:"⭐", label:"Ratings" },
   ];
-
+ 
   return (
     <div style={{fontFamily:FONT,minHeight:"100vh",background:A.bg,color:A.textPrimary,maxWidth:480,margin:"0 auto",paddingBottom:76}}>
-
+ 
       {/* Toast */}
       {toast&&(
         <div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:A.teal,color:"#fff",
@@ -1303,7 +1306,7 @@ export default function MealPlanner() {
           {toast}
         </div>
       )}
-
+ 
       {/* Overlays */}
       {viewRecipe&&<RecipeSheet meal={viewRecipe} onClose={()=>setViewRecipe(null)} onEdit={m=>{setEditRecipe(m);}}/>}
       {editRecipe&&<EditRecipeModal meal={editRecipe} onSave={saveEditedRecipe} onClose={()=>setEditRecipe(null)}/>}
@@ -1313,7 +1316,7 @@ export default function MealPlanner() {
         <ManualSwapSheet day={swapSheet.day} allRecipes={allRecipes} currentMeal={plan[swapSheet.day]}
           onSwap={m=>swapManual(swapSheet.day,m)} onClose={()=>setSwapSheet(null)}/>
       )}
-
+ 
       {/* Save week modal */}
       {saveModal&&(
         <Modal onClose={()=>setSaveModal(false)}>
@@ -1331,7 +1334,7 @@ export default function MealPlanner() {
           </div>
         </Modal>
       )}
-
+ 
       {/* Saved weeks sheet */}
       {savedSheet&&(
         <Sheet onClose={()=>setSavedSheet(false)} title="Saved Weeks">
@@ -1360,7 +1363,7 @@ export default function MealPlanner() {
           </div>
         </Sheet>
       )}
-
+ 
       {/* Recipe library sheet */}
       {librarySheet&&(
         <Sheet onClose={()=>setLibrarySheet(false)} title="Recipe Library">
@@ -1407,7 +1410,7 @@ export default function MealPlanner() {
           </div>
         </Sheet>
       )}
-
+ 
       {/* ── HEADER ── */}
       <div style={{padding:"52px 20px 20px",background:"linear-gradient(180deg,#E8EDF2 0%,#F2F4F6 100%)"}}>
         <div style={{fontSize:11,color:A.teal,letterSpacing:3,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Family Meal Planner</div>
@@ -1429,10 +1432,10 @@ export default function MealPlanner() {
           </div>
         </div>
       </div>
-
+ 
       {/* ── CONTENT ── */}
       <div style={{padding:"8px 16px 24px"}}>
-
+ 
         {/* PLAN TAB */}
         {tab==="plan"&&(
           <>
@@ -1450,14 +1453,14 @@ export default function MealPlanner() {
                     ⚠️ AI unavailable — showing curated meals
                   </div>
                 )}
-
+ 
                 {DAYS.map(day=>{
                   const meal=plan[day]; if(!meal) return null;
                   const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
                   const rating=ratings[meal.name];
                   const isSwapping=swappingDay===day;
                   const isSkipped=skippedDays[day] !== undefined && skippedDays[day] !== false;
-
+ 
                   // ── Skipped card ──
                   if (isSkipped) return (
                     <div key={day}
@@ -1492,7 +1495,7 @@ export default function MealPlanner() {
                       </div>
                     </div>
                   );
-
+ 
                   // ── Normal card ──
                   const portion = portionSizes[day] || 1;
                   const baseServings = Number(meal.servings) || 4;
@@ -1571,7 +1574,7 @@ export default function MealPlanner() {
                     </div>
                   );
                 })}
-
+ 
                 <button onClick={()=>generateWeek(true)}
                   style={{width:"100%",padding:16,background:A.teal,color:"#fff",border:"none",borderRadius:14,
                     cursor:"pointer",fontSize:15,fontWeight:700,marginBottom:10,
@@ -1586,7 +1589,7 @@ export default function MealPlanner() {
             )}
           </>
         )}
-
+ 
         {/* GROCERY TAB */}
         {tab==="groceries"&&(
           <>
@@ -1608,7 +1611,7 @@ export default function MealPlanner() {
                 💡 Copy → open Instacart → paste into notes or cart
               </div>
             </div>
-
+ 
             {/* Grouped list */}
             {Object.entries(groceryCats).map(([cat, items])=>(
               <div key={cat} style={{marginBottom:16}}>
@@ -1681,11 +1684,11 @@ export default function MealPlanner() {
                 </div>
               )}
             </div>
-
+ 
             <button onClick={()=>{setChecked({});setManualItems([]);}} style={{width:"100%",marginTop:4,background:"transparent",border:`1px solid ${A.border}`,padding:13,borderRadius:12,cursor:"pointer",fontSize:13,color:A.textSecondary}}>↺ Reset All</button>
           </>
         )}
-
+ 
         {/* RATINGS TAB */}
         {tab==="ratings"&&(
           <>
@@ -1707,7 +1710,7 @@ export default function MealPlanner() {
                 </div>
               }
             </div>
-
+ 
             {/* Rate this week */}
             <div style={{background:A.surface,borderRadius:18,padding:18,marginBottom:16,border:`1px solid ${A.border}`}}>
               <div style={{fontWeight:700,fontSize:15,color:A.textPrimary,marginBottom:4}}>Rate This Week</div>
@@ -1733,7 +1736,7 @@ export default function MealPlanner() {
                 );
               })}
             </div>
-
+ 
             {/* History */}
             {Object.keys(ratings).length>0&&(
               <>
@@ -1767,7 +1770,7 @@ export default function MealPlanner() {
           </>
         )}
       </div>
-
+ 
       {/* ── BOTTOM NAV ── */}
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,
         background:A.surface,borderTop:`1px solid ${A.border}`,display:"flex",zIndex:500,
@@ -1785,3 +1788,4 @@ export default function MealPlanner() {
     </div>
   );
 }
+ 
