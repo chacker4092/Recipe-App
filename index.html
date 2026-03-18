@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0077B6" />
+
+    <!-- iOS specific -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Meal Planner" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+
+    <!-- Splash screen background matches app -->
+    <meta name="msapplication-TileColor" content="#0077B6" />
+
+    <title>Family Meal Planner</title>
+
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { background: #F2F4F6; }
+      /* Safe area insets for iPhone notch / home bar */
+      #root {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Register service worker -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js")
+            .then(() => console.log("SW registered"))
+            .catch(e => console.log("SW failed:", e));
+        });
+      }
+    </script>
+  </body>
+</html>
