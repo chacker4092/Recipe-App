@@ -505,11 +505,44 @@ function Pill({ children, color, bg, size=11 }) {
 }
 
 function Sheet({ onClose, children, title }) {
+  const sheetRef = useRef(null);
+  const startYRef = useRef(null);
+  const currentYRef = useRef(0);
+
+  const onTouchStart = (e) => {
+    startYRef.current = e.touches[0].clientY;
+    currentYRef.current = 0;
+    if (sheetRef.current) sheetRef.current.style.transition = "none";
+  };
+  const onTouchMove = (e) => {
+    const dy = e.touches[0].clientY - startYRef.current;
+    if (dy < 0) return; // don't allow dragging up
+    currentYRef.current = dy;
+    if (sheetRef.current) sheetRef.current.style.transform = `translateY(${dy}px)`;
+  };
+  const onTouchEnd = () => {
+    if (sheetRef.current) sheetRef.current.style.transition = "transform 0.3s ease";
+    if (currentYRef.current > 120) {
+      // dismissed — animate out then close
+      if (sheetRef.current) sheetRef.current.style.transform = "translateY(100%)";
+      setTimeout(onClose, 280);
+    } else {
+      if (sheetRef.current) sheetRef.current.style.transform = "translateY(0)";
+    }
+  };
+
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:900,display:"flex",alignItems:"flex-end"}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:A.surface,borderRadius:"20px 20px 0 0",width:"100%",maxHeight:"88vh",overflowY:"auto",fontFamily:FONT,boxShadow:"0 -4px 32px rgba(0,0,0,0.12)"}}>
-        <div style={{width:36,height:4,background:A.borderBright,borderRadius:2,margin:"12px auto 0",flexShrink:0}}/>
-        {title&&<div style={{padding:"14px 20px 0",fontSize:18,fontWeight:700,color:A.textPrimary}}>{title}</div>}
+      <div ref={sheetRef} onClick={e=>e.stopPropagation()}
+        style={{background:A.surface,borderRadius:"20px 20px 0 0",width:"100%",maxHeight:"88vh",
+          overflowY:"auto",fontFamily:FONT,boxShadow:"0 -4px 32px rgba(0,0,0,0.12)",
+          transform:"translateY(0)",transition:"transform 0.3s ease"}}>
+        {/* Drag handle — touch target covers full width for easy grabbing */}
+        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+          style={{padding:"14px 0 6px",cursor:"grab",touchAction:"none",userSelect:"none"}}>
+          <div style={{width:40,height:5,background:A.borderBright,borderRadius:3,margin:"0 auto"}}/>
+        </div>
+        {title&&<div style={{padding:"4px 20px 0",fontSize:18,fontWeight:700,color:A.textPrimary}}>{title}</div>}
         {children}
       </div>
     </div>
@@ -1134,8 +1167,7 @@ export default function MealPlanner() {
   const [rateModal, setRateModal]     = useState(null);
   const [swapSheet, setSwapSheet]     = useState(null); // { day, aiMode }
   const [swappingDay, setSwappingDay] = useState(null);
-  const [dragDay, setDragDay]         = useState(null);  // day being dragged
-  const [dragOverDay, setDragOverDay] = useState(null);  // day being hovered over
+  const [swapSelectDay, setSwapSelectDay] = useState(null); // first day tapped for swap
   const [skippedDays, setSkippedDays] = useState({});
   const [portionSizes, setPortionSizes] = useState({}); // { Monday: 1, Tuesday: 0.5, ... }
   const [copied, setCopied]           = useState(false);
@@ -1237,12 +1269,22 @@ export default function MealPlanner() {
   const swapDays = (dayA, dayB) => {
     if (!dayA || !dayB || dayA === dayB) return;
     const newPlan = { ...plan, [dayA]: plan[dayB], [dayB]: plan[dayA] };
-    // Also swap portion sizes and skip states
     setPortionSizes(p => ({ ...p, [dayA]: p[dayB]||1, [dayB]: p[dayA]||1 }));
     setSkippedDays(p => ({ ...p, [dayA]: p[dayB]||false, [dayB]: p[dayA]||false }));
     setPlan(newPlan);
     setChecked({});
-    showToast(`${dayA} & ${dayB} swapped!`);
+    setSwapSelectDay(null);
+    showToast(`${dayA} & ${dayB} swapped! 🔄`);
+  };
+
+  const handleDayTap = (day) => {
+    if (!swapSelectDay) {
+      setSwapSelectDay(day); // first tap — select this day
+    } else if (swapSelectDay === day) {
+      setSwapSelectDay(null); // tapped same day — deselect
+    } else {
+      swapDays(swapSelectDay, day); // second tap — swap!
+    }
   };
 
   const saveWeek = () => {
@@ -1289,7 +1331,7 @@ export default function MealPlanner() {
   const NAV = [
     { id:"plan",      icon:"🗓", label:"Meals" },
     { id:"groceries", icon:"🛒", label:`Shop${allGroceries.length?` (${unchecked})`:""}`},
-    { id:"ratings",   icon:"⭐", label:"Ratings" },
+    { id:"library",   icon:"👨‍🍳", label:"Recipes" },
   ];
 
   return (
@@ -1361,52 +1403,7 @@ export default function MealPlanner() {
         </Sheet>
       )}
 
-      {/* Recipe library sheet */}
-      {librarySheet&&(
-        <Sheet onClose={()=>setLibrarySheet(false)} title="Recipe Library">
-          <div style={{padding:"14px 20px 32px"}}>
-            <button onClick={()=>{setLibrarySheet(false);setAddModal(true);}}
-              style={{width:"100%",padding:14,background:A.teal,color:"#fff",border:"none",borderRadius:14,
-                cursor:"pointer",fontSize:14,fontWeight:700,marginBottom:14}}>
-              + Add Recipe (Link or Photo)
-            </button>
-            <div style={{fontSize:11,color:A.textMuted,marginBottom:12,letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{allRecipes.length} Recipes</div>
-            {allRecipes.map(meal=>{
-              const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
-              return(
-                <div key={meal.id} style={{background:A.surface2,borderRadius:14,padding:"14px 16px",marginBottom:8,border:`1px solid ${A.border}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div style={{flex:1,cursor:"pointer"}} onClick={()=>setViewRecipe(meal)}>
-                      <div style={{fontWeight:600,fontSize:14,color:A.textPrimary,marginBottom:6,lineHeight:1.3}}>{meal.name}</div>
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                        <Pill color={meta.color} bg={meta.bg}>{meta.emoji} {meta.label}</Pill>
-                        {meal.toddlerFriendly&&<Pill color={A.amber} bg="#FFF8E6">🐣</Pill>}
-                        {meal.source==="custom"&&<Pill color={A.teal} bg={A.tealSoft}>🔗</Pill>}
-                        {meal.cookTime&&<Pill color={A.textMuted} bg={A.surface3}>⏱ {meal.cookTime}</Pill>}
-                      </div>
-                    </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:12}}>
-                      <div style={{display:"flex",gap:3}}>
-                        {DAYS.map(d=>(
-                          <button key={d} onClick={()=>{swapManual(d,meal);setLibrarySheet(false);}}
-                            title={`Assign to ${d}`}
-                            style={{background:plan[d]?.id===meal.id?A.teal:A.surface3,color:plan[d]?.id===meal.id?"#000":A.textMuted,
-                              border:"none",borderRadius:5,padding:"3px 5px",cursor:"pointer",fontSize:9,fontWeight:700}}>
-                            {d[0]}
-                          </button>
-                        ))}
-                      </div>
-                      {meal.source==="custom"&&(
-                        <button onClick={()=>deleteCustom(meal.id)} style={{background:"transparent",color:A.red,border:`1px solid ${A.red}44`,borderRadius:6,padding:"3px 6px",cursor:"pointer",fontSize:10,textAlign:"center"}}>Remove</button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Sheet>
-      )}
+
 
       {/* ── HEADER ── */}
       <div style={{padding:"52px 20px 20px",background:"linear-gradient(180deg,#E8EDF2 0%,#F2F4F6 100%)"}}>
@@ -1420,11 +1417,13 @@ export default function MealPlanner() {
             </div>
           </div>
           <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setSavedSheet(true)} style={{background:A.surface2,border:`1px solid ${A.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer",color:A.textSecondary,fontSize:11,fontWeight:600}}>
-              📚 {Object.keys(savedWeeks).length}
-            </button>
-            <button onClick={()=>setLibrarySheet(true)} style={{background:A.surface2,border:`1px solid ${A.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer",color:A.textSecondary,fontSize:11,fontWeight:600}}>
-              📖 {allRecipes.length}
+            <button onClick={()=>setSavedSheet(true)}
+              style={{background:A.surface,border:`1px solid ${A.border}`,borderRadius:12,
+                padding:"8px 12px",cursor:"pointer",display:"flex",flexDirection:"column",
+                alignItems:"center",gap:2,boxShadow:"0 1px 3px rgba(0,0,0,0.07)"}}>
+              <span style={{fontSize:20}}>📅</span>
+              <span style={{fontSize:9,color:A.textSecondary,fontWeight:700,letterSpacing:0.3}}>SAVED WEEKS</span>
+              <span style={{fontSize:10,color:A.teal,fontWeight:700}}>{Object.keys(savedWeeks).length}</span>
             </button>
           </div>
         </div>
@@ -1450,6 +1449,16 @@ export default function MealPlanner() {
                     ⚠️ AI unavailable — showing curated meals
                   </div>
                 )}
+                {swapSelectDay&&(
+                  <div style={{background:A.tealSoft,border:`1px solid ${A.teal}44`,borderRadius:12,
+                    padding:"10px 14px",marginBottom:12,fontSize:13,color:A.teal,fontWeight:600,
+                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span>🔄 Now tap another day to swap with <strong>{swapSelectDay}</strong></span>
+                    <button onClick={()=>setSwapSelectDay(null)}
+                      style={{background:"transparent",border:"none",cursor:"pointer",
+                        color:A.teal,fontSize:16,padding:"0 4px"}}>✕</button>
+                  </div>
+                )}
 
                 {DAYS.map(day=>{
                   const meal=plan[day]; if(!meal) return null;
@@ -1461,16 +1470,12 @@ export default function MealPlanner() {
                   // ── Skipped card ──
                   if (isSkipped) return (
                     <div key={day}
-                      draggable
-                      onDragStart={()=>{setDragDay(day);}}
-                      onDragEnd={()=>{setDragDay(null);setDragOverDay(null);}}
-                      onDragOver={e=>{e.preventDefault();setDragOverDay(day);}}
-                      onDrop={e=>{e.preventDefault();swapDays(dragDay,day);setDragDay(null);setDragOverDay(null);}}
                       style={{background:A.surface2,borderRadius:18,padding:16,marginBottom:12,
-                        border:`2px solid ${dragOverDay===day?A.teal:A.border}`,
-                        boxShadow:"0 1px 4px rgba(0,0,0,0.05)",
-                        opacity:dragDay===day?0.45:1,
-                        transition:"border-color 0.15s, opacity 0.15s",cursor:"grab"}}>
+                        border:`2px solid ${swapSelectDay===day?A.teal:swapSelectDay?A.teal+"44":A.border}`,
+                        boxShadow:swapSelectDay===day?`0 0 0 3px ${A.teal}33`:"0 1px 4px rgba(0,0,0,0.05)",
+                        opacity:swapSelectDay&&swapSelectDay!==day?0.7:1,
+                        transition:"all 0.15s",cursor:swapSelectDay?"pointer":"default"}}
+                      onClick={()=>swapSelectDay&&swapSelectDay!==day&&handleDayTap(day)}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                         <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:700}}>{day}</div>
                         <button onClick={()=>setSkippedDays(p=>({...p,[day]:false}))}
@@ -1499,19 +1504,22 @@ export default function MealPlanner() {
                   const scaledServings = Math.round(baseServings * portion);
                   return(
                     <div key={day}
-                      draggable
-                      onDragStart={()=>{setDragDay(day);}}
-                      onDragEnd={()=>{setDragDay(null);setDragOverDay(null);}}
-                      onDragOver={e=>{e.preventDefault();setDragOverDay(day);}}
-                      onDrop={e=>{e.preventDefault();swapDays(dragDay,day);setDragDay(null);setDragOverDay(null);}}
                       style={{background:A.surface,borderRadius:18,padding:16,marginBottom:12,
-                        border:`2px solid ${dragOverDay===day?A.teal:A.border}`,
-                        boxShadow:dragOverDay===day?`0 0 0 3px ${A.teal}22`:"0 1px 4px rgba(0,0,0,0.07)",
-                        opacity:dragDay===day?0.45:isSwapping?.4:1,
-                        transition:"border-color 0.15s, box-shadow 0.15s, opacity 0.2s",cursor:"grab"}}>
+                        border:`2px solid ${swapSelectDay===day?A.teal:swapSelectDay?A.teal+"55":A.border}`,
+                        boxShadow:swapSelectDay===day?`0 0 0 3px ${A.teal}33`:"0 1px 4px rgba(0,0,0,0.07)",
+                        opacity:isSwapping?.4:swapSelectDay&&swapSelectDay!==day?0.7:1,
+                        transition:"all 0.15s"}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
                         <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:700}}>{day}</div>
-                        <div style={{fontSize:14,color:A.textMuted,opacity:0.5,userSelect:"none",cursor:"grab"}} title="Drag to swap days">⠿</div>
+                        <button onClick={()=>handleDayTap(day)}
+                          style={{background:swapSelectDay===day?A.teal:A.surface3,
+                            border:`1px solid ${swapSelectDay===day?A.teal:A.border}`,
+                            borderRadius:8,padding:"3px 10px",cursor:"pointer",
+                            fontSize:11,fontWeight:700,
+                            color:swapSelectDay===day?"#fff":A.textMuted,
+                            transition:"all 0.15s"}}>
+                          {swapSelectDay===day?"✓ Selected":"⇅ Swap"}
+                        </button>
                       </div>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                         <div style={{flex:1,cursor:"pointer",paddingRight:8}} onClick={()=>setViewRecipe(meal)}>
@@ -1539,12 +1547,7 @@ export default function MealPlanner() {
                               cursor:"pointer",fontSize:11,color:A.textSecondary,fontWeight:600,whiteSpace:"nowrap"}}>
                             ☰ Pick
                           </button>
-                          <button onClick={()=>setRateModal(meal)}
-                            style={{background:rating?.stars>0?A.tealSoft:A.surface3,border:`1px solid ${rating?.stars>0?A.teal:A.border}`,
-                              borderRadius:8,padding:"6px 11px",cursor:"pointer",fontSize:11,
-                              color:rating?.stars>0?A.teal:A.textSecondary,fontWeight:600,whiteSpace:"nowrap"}}>
-                            {rating?.stars>0?"✎ Rate":"☆ Rate"}
-                          </button>
+
                           <button onClick={()=>setSkippedDays(p=>({...p,[day]:""}))}
                             style={{background:"transparent",border:`1px solid ${A.border}`,borderRadius:8,padding:"6px 11px",
                               cursor:"pointer",fontSize:11,color:A.textMuted,fontWeight:500,whiteSpace:"nowrap"}}>
@@ -1567,6 +1570,22 @@ export default function MealPlanner() {
                             </button>
                           ))}
                         </div>
+                      </div>
+                      {/* Inline rating row */}
+                      <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${A.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <div style={{fontSize:12,color:A.textSecondary,fontWeight:500}}>
+                          {rating?.stars>0
+                            ? <span style={{color:A.amber}}>{"⭐".repeat(rating.stars)}{rating.note&&<span style={{color:A.textMuted,fontSize:11,fontStyle:"italic",marginLeft:6}}>"{rating.note.slice(0,30)}{rating.note.length>30?"…":""}"</span>}</span>
+                            : <span style={{color:A.textMuted}}>No rating yet</span>
+                          }
+                        </div>
+                        <button onClick={()=>setRateModal(meal)}
+                          style={{background:rating?.stars>0?A.tealSoft:A.surface3,
+                            border:`1px solid ${rating?.stars>0?A.teal:A.border}`,
+                            borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,
+                            color:rating?.stars>0?A.teal:A.textSecondary,fontWeight:600}}>
+                          {rating?.stars>0?"✏️ Edit Rating":"☆ Rate"}
+                        </button>
                       </div>
                     </div>
                   );
@@ -1686,86 +1705,56 @@ export default function MealPlanner() {
           </>
         )}
 
-        {/* RATINGS TAB */}
-        {tab==="ratings"&&(
+        {/* LIBRARY TAB */}
+        {/* LIBRARY TAB */}
+        {tab==="library"&&(
           <>
-            {/* Summary */}
-            <div style={{background:A.surface,borderRadius:18,padding:20,marginBottom:16,border:`1px solid ${A.border}`,position:"relative",overflow:"hidden"}}>
-              <div style={{position:"absolute",top:-20,right:-20,width:100,height:100,background:A.teal,opacity:0.08,borderRadius:"50%"}}/>
-              <div style={{fontSize:10,color:A.teal,letterSpacing:3,textTransform:"uppercase",fontWeight:700,marginBottom:12}}>Family Verdict</div>
-              {Object.keys(ratings).length===0
-                ?<div style={{fontSize:14,color:A.textMuted,fontStyle:"italic"}}>No ratings yet — rate meals after you cook them!</div>
-                :<div style={{display:"flex",gap:20,alignItems:"center"}}>
-                  <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:40,fontWeight:700,color:A.teal,lineHeight:1}}>{avgRating()}</div>
-                    <div style={{fontSize:11,color:A.textMuted,marginTop:3}}>avg rating</div>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,color:A.textSecondary,marginBottom:4}}>{Object.values(ratings).filter(r=>r.wouldMakeAgain===true).length} meals to make again 🔁</div>
-                    <div style={{fontSize:13,color:A.textSecondary}}>{Object.keys(ratings).length} total rated</div>
-                  </div>
-                </div>
-              }
-            </div>
-
-            {/* Rate this week */}
-            <div style={{background:A.surface,borderRadius:18,padding:18,marginBottom:16,border:`1px solid ${A.border}`}}>
-              <div style={{fontWeight:700,fontSize:15,color:A.textPrimary,marginBottom:4}}>Rate This Week</div>
-              <div style={{fontSize:12,color:A.textSecondary,marginBottom:14}}>Tap any meal to leave a rating.</div>
-              {DAYS.map(day=>{
-                const meal=plan[day]; if(!meal) return null;
-                const r=ratings[meal.name];
-                return(
-                  <div key={day} onClick={()=>setRateModal(meal)}
-                    style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 0",borderBottom:`1px solid ${A.border}`,cursor:"pointer"}}>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:600,color:A.textPrimary}}>{meal.name}</div>
-                      <div style={{fontSize:11,color:A.textMuted,marginTop:1}}>{day}</div>
+            <button onClick={()=>setAddModal(true)}
+              style={{width:"100%",padding:14,background:A.teal,color:"#fff",border:"none",borderRadius:14,
+                cursor:"pointer",fontSize:14,fontWeight:700,marginBottom:14}}>
+              + Add Recipe (Link or Photo)
+            </button>
+            <div style={{fontSize:11,color:A.textMuted,marginBottom:12,letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{allRecipes.length} Recipes</div>
+            {allRecipes.map(meal=>{
+              const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
+              return(
+                <div key={meal.id} style={{background:A.surface,borderRadius:14,padding:"14px 16px",marginBottom:8,border:`1px solid ${A.border}`,boxShadow:"0 1px 3px rgba(0,0,0,0.05)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div style={{flex:1,cursor:"pointer"}} onClick={()=>setViewRecipe(meal)}>
+                      <div style={{fontWeight:600,fontSize:14,color:A.textPrimary,marginBottom:6,lineHeight:1.3}}>{meal.name}</div>
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                        <Pill color={meta.color} bg={meta.bg}>{meta.emoji} {meta.label}</Pill>
+                        {meal.toddlerFriendly&&<Pill color={A.amber} bg="#FFF8E6">🐣</Pill>}
+                        {meal.source==="custom"&&<Pill color={A.teal} bg={A.tealSoft}>🔗</Pill>}
+                        {meal.cookTime&&<Pill color={A.textMuted} bg={A.surface3}>⏱ {meal.cookTime}</Pill>}
+                      </div>
                     </div>
-                    {r?.stars>0
-                      ?<div style={{textAlign:"right"}}>
-                        <div style={{fontSize:13}}>{"⭐".repeat(r.stars)}</div>
-                        {r.wouldMakeAgain!==null&&<div style={{fontSize:10,color:r.wouldMakeAgain?A.verde:A.red,marginTop:2}}>{r.wouldMakeAgain?"🔁 Again":"👎 Skip"}</div>}
+                    <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:12}}>
+                      <div style={{display:"flex",gap:3,flexWrap:"wrap",maxWidth:160,justifyContent:"flex-end"}}>
+                        {DAYS.map(d=>(
+                          <button key={d} onClick={()=>swapManual(d,meal)}
+                            style={{background:A.teal,color:"#fff",border:"none",borderRadius:4,
+                              padding:"3px 5px",cursor:"pointer",fontSize:9,fontWeight:700,lineHeight:1.2}}>
+                            {d.slice(0,2)}
+                          </button>
+                        ))}
                       </div>
-                      :<span style={{fontSize:12,color:A.teal,border:`1px solid ${A.teal}44`,borderRadius:20,padding:"3px 12px",fontWeight:600}}>Rate</span>
-                    }
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* History */}
-            {Object.keys(ratings).length>0&&(
-              <>
-                <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:600,marginBottom:10}}>All Rated Meals</div>
-                {Object.entries(ratings).sort((a,b)=>b[1].stars-a[1].stars).map(([name,r])=>(
-                  <div key={name} style={{background:A.surface,borderRadius:14,padding:"14px 16px",marginBottom:8,border:`1px solid ${A.border}`}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:600,fontSize:14,color:A.textPrimary,marginBottom:5}}>{name}</div>
-                        <div style={{fontSize:15,marginBottom:r.note?5:0}}>{"⭐".repeat(r.stars)}{"☆".repeat(5-r.stars)}</div>
-                        {r.note&&<div style={{fontSize:12,color:A.textSecondary,fontStyle:"italic",lineHeight:1.4}}>"{r.note}"</div>}
-                      </div>
-                      {r.wouldMakeAgain!==null&&(
-                        <span style={{fontSize:11,padding:"4px 10px",borderRadius:20,
-                          background:r.wouldMakeAgain?A.tealSoft:"#FEF2F2",
-                          color:r.wouldMakeAgain?A.teal:A.red,
-                          border:`1px solid ${r.wouldMakeAgain?A.teal:A.red}44`,
-                          marginLeft:10,whiteSpace:"nowrap",fontWeight:500}}>
-                          {r.wouldMakeAgain?"🔁 Again":"👎 Skip"}
-                        </span>
+                      {meal.source!=="builtin"&&(
+                        <button onClick={()=>deleteCustom(meal.id)}
+                          style={{background:A.surface3,color:A.red,border:`1px solid ${A.red}44`,
+                            borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>
+                          🗑 Remove
+                        </button>
                       )}
                     </div>
                   </div>
-                ))}
-                <button onClick={()=>{setRatings({});persist(savedWeeks,myRecipes,{});showToast("Ratings cleared");}}
-                  style={{width:"100%",marginTop:6,background:"transparent",border:`1px solid ${A.border}`,padding:12,borderRadius:12,cursor:"pointer",fontSize:12,color:A.textMuted}}>
-                  Clear All Ratings
-                </button>
-              </>
-            )}
+                </div>
+              );
+            })}
           </>
         )}
+
+
       </div>
 
       {/* ── BOTTOM NAV ── */}
