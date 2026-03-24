@@ -1731,13 +1731,19 @@ export default function MealPlanner() {
                     </div>
                     <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:12}}>
                       <div style={{display:"flex",gap:3,flexWrap:"wrap",maxWidth:160,justifyContent:"flex-end"}}>
-                        {DAYS.map(d=>(
+                        {DAYS.map(d=>{
+                          const isAssigned = plan[d]?.id === meal.id;
+                          return (
                           <button key={d} onClick={()=>swapManual(d,meal)}
-                            style={{background:A.teal,color:"#fff",border:"none",borderRadius:4,
-                              padding:"3px 5px",cursor:"pointer",fontSize:9,fontWeight:700,lineHeight:1.2}}>
+                            title={isAssigned ? `Assigned to ${d}` : `Assign to ${d}`}
+                            style={{background:isAssigned?A.teal:A.surface3,
+                              color:isAssigned?"#fff":A.textMuted,
+                              border:`1px solid ${isAssigned?A.teal:A.border}`,
+                              borderRadius:4,padding:"3px 5px",cursor:"pointer",
+                              fontSize:9,fontWeight:700,lineHeight:1.2,transition:"all 0.15s"}}>
                             {d.slice(0,2)}
                           </button>
-                        ))}
+                        )})}
                       </div>
                       {meal.source!=="builtin"&&(
                         <button onClick={()=>deleteCustom(meal.id)}
