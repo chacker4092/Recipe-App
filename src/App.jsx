@@ -396,24 +396,34 @@ Every ingredient must have a quantity and unit.`;
 }
 
 async function fetchRecipeFromUrl(url) {
-  // Extract recipe keywords from URL path for context
-  const slug = url.replace(/https?:\/\/[^/]+/,"").replace(/[^a-z0-9]+/gi," ").trim();
-  const prompt = `Create a family-friendly dinner recipe inspired by this URL: ${url}
-URL keywords: "${slug}"
+  // Pull meaningful parts from the URL slug for context
+  const slug = url
+    .replace(/https?:\/\/[^/]+\//,"")
+    .replace(/[^a-z0-9]+/gi," ")
+    .replace(/(recipe|recipes|www|com|html|php|the|and|with|for)/gi,"")
+    .trim()
+    .slice(0, 120);
 
-Use the keywords to infer the recipe name and style. Respond with ONLY this JSON object (no explanation, no markdown):
-{"name":"Recipe Name Here","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken thighs","3 tbsp olive oil","1 tsp garlic powder"],"instructions":["Step 1.","Step 2.","Step 3."],"groceries":["2 lbs chicken thighs","3 tbsp olive oil","1 tsp garlic powder"]}
+  const prompt = `You are a professional recipe developer. A user shared this recipe URL:
+${url}
 
-Rules:
-- method must be exactly one of: "crockpot", "sheetpan", or "instapot"
-- Every ingredient must include quantity + unit
-- servings must be a plain number
-- Start your response with { and end with }`;
+The URL slug suggests this recipe is about: "${slug}"
 
-  const text = await callClaude([{ role: "user", content: prompt }], 1000);
+Your job: generate a COMPLETE, ACCURATE recipe that matches this URL as closely as possible.
+- Use the slug keywords to identify the exact dish name, main protein, cuisine style, and cooking method
+- Generate realistic, detailed ingredients with exact quantities a home cook would use
+- Write clear step-by-step instructions (4-6 steps)
+- Choose the closest cooking method: crockpot (slow cooker), sheetpan (oven roasting), or instapot (pressure cooker)
+- Make it family-friendly for 2 adults + 1 toddler
+
+Return ONLY this JSON, starting with { and ending with }, no other text:
+{"name":"Exact Recipe Name","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken thighs, bone-in","3 tbsp olive oil","1 tsp garlic powder","1 tsp smoked paprika","1 tsp salt","½ tsp black pepper"],"instructions":["Preheat oven to 425°F and line a sheet pan with foil.","Pat chicken dry and rub with olive oil and spices.","Roast 35-40 min until golden and cooked through.","Rest 5 min before serving."],"groceries":["2 lbs chicken thighs","3 tbsp olive oil","1 tsp garlic powder","1 tsp smoked paprika"]}`;
+
+  const text = await callClaude([{ role: "user", content: prompt }], 1500);
   let meal;
   try { meal = extractJSON(text); }
-  catch(e) { throw new Error("Could not parse recipe from response"); }
+  catch(e) { throw new Error("Could not read recipe — try a more specific recipe page URL"); }
+  if (!meal.name) throw new Error("Recipe name missing");
   if (!["crockpot","sheetpan","instapot"].includes(meal.method)) meal.method = "sheetpan";
   return { ...meal, id: `custom_${Date.now()}`, source: "custom", recipeUrl: url, servings: Number(meal.servings) || 4 };
 }
@@ -491,8 +501,11 @@ Return ONLY this JSON (no explanation):
   return { ...meal, id: `photo_${Date.now()}`, source: "custom", recipeUrl: "", servings: Number(meal.servings) || 4 };
 }
 
-// ─── In-memory store ──────────────────────────────────────────────────────────
-const store = { _d: {}, get: k => store._d[k], set: (k,v) => { store._d[k] = v; } };
+// ─── Persistent store (localStorage) ─────────────────────────────────────────
+const store = {
+  get: (k) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
 
 // ─── UI Primitives ────────────────────────────────────────────────────────────
 function Pill({ children, color, bg, size=11 }) {
@@ -537,12 +550,12 @@ function Sheet({ onClose, children, title }) {
         style={{background:A.surface,borderRadius:"20px 20px 0 0",width:"100%",maxHeight:"88vh",
           overflowY:"auto",fontFamily:FONT,boxShadow:"0 -4px 32px rgba(0,0,0,0.12)",
           transform:"translateY(0)",transition:"transform 0.3s ease"}}>
-        {/* Drag handle — touch target covers full width for easy grabbing */}
+        {/* Drag zone covers handle + title row — easier to grab on mobile */}
         <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-          style={{padding:"14px 0 6px",cursor:"grab",touchAction:"none",userSelect:"none"}}>
-          <div style={{width:40,height:5,background:A.borderBright,borderRadius:3,margin:"0 auto"}}/>
+          style={{padding:"14px 20px 10px",cursor:"grab",touchAction:"none",userSelect:"none"}}>
+          <div style={{width:40,height:5,background:A.borderBright,borderRadius:3,margin:"0 auto 0"}}/>
+          {title&&<div style={{fontSize:18,fontWeight:700,color:A.textPrimary,marginTop:10,pointerEvents:"none"}}>{title}</div>}
         </div>
-        {title&&<div style={{padding:"4px 20px 0",fontSize:18,fontWeight:700,color:A.textPrimary}}>{title}</div>}
         {children}
       </div>
     </div>
@@ -1523,7 +1536,7 @@ export default function MealPlanner() {
                       </div>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                         <div style={{flex:1,cursor:"pointer",paddingRight:8}} onClick={()=>setViewRecipe(meal)}>
-                          <div style={{width:28,height:3,background:meta.color,borderRadius:2,marginBottom:8}}/>
+
                           <div style={{fontSize:16,fontWeight:700,color:A.textPrimary,lineHeight:1.3,marginBottom:8}}>{meal.name}</div>
                           <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
                             <Pill color={meta.color} bg={meta.bg}>{meta.emoji} {meta.label}</Pill>
