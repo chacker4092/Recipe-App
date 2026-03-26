@@ -396,30 +396,43 @@ Every ingredient must have a quantity and unit.`;
 }
 
 async function fetchRecipeFromUrl(url) {
-  // Pull meaningful parts from the URL slug for context
-  const slug = url
-    .replace(/https?:\/\/[^/]+\//,"")
-    .replace(/[^a-z0-9]+/gi," ")
-    .replace(/(recipe|recipes|www|com|html|php|the|and|with|for)/gi,"")
-    .trim()
-    .slice(0, 120);
+  // Step 1: Fetch the actual page content via our Vercel proxy
+  let pageText = "";
+  try {
+    const proxyEndpoint = window.location.hostname === "localhost" ? null : "/api/claude";
+    if (proxyEndpoint) {
+      const pageRes = await fetch(proxyEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fetchUrl: url }),
+      });
+      const pageData = await pageRes.json();
+      pageText = pageData.text || "";
+    }
+  } catch(e) {
+    // If page fetch fails, fall back to slug-based generation
+  }
 
-  const prompt = `You are a professional recipe developer. A user shared this recipe URL:
-${url}
+  // Step 2: Send page content (or URL slug fallback) to Claude
+  const slug = url.replace(/https?:\/\/[^/]+\//,"").replace(/[^a-z0-9]+/gi," ").trim().slice(0, 100);
 
-The URL slug suggests this recipe is about: "${slug}"
+  const prompt = pageText.length > 200
+    ? `You are a recipe extractor. Extract the recipe from this webpage content and return it as JSON.
 
-Your job: generate a COMPLETE, ACCURATE recipe that matches this URL as closely as possible.
-- Use the slug keywords to identify the exact dish name, main protein, cuisine style, and cooking method
-- Generate realistic, detailed ingredients with exact quantities a home cook would use
-- Write clear step-by-step instructions (4-6 steps)
-- Choose the closest cooking method: crockpot (slow cooker), sheetpan (oven roasting), or instapot (pressure cooker)
-- Make it family-friendly for 2 adults + 1 toddler
+WEBPAGE CONTENT:
+${pageText.slice(0, 6000)}
 
-Return ONLY this JSON, starting with { and ending with }, no other text:
-{"name":"Exact Recipe Name","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken thighs, bone-in","3 tbsp olive oil","1 tsp garlic powder","1 tsp smoked paprika","1 tsp salt","½ tsp black pepper"],"instructions":["Preheat oven to 425°F and line a sheet pan with foil.","Pat chicken dry and rub with olive oil and spices.","Roast 35-40 min until golden and cooked through.","Rest 5 min before serving."],"groceries":["2 lbs chicken thighs","3 tbsp olive oil","1 tsp garlic powder","1 tsp smoked paprika"]}`;
+Extract EVERY ingredient exactly as written, all steps in full detail, and the correct cook time.
+Choose the closest method: "crockpot" (slow cooker), "sheetpan" (oven/roasting), or "instapot" (pressure cooker).
+If the recipe uses a skillet or stovetop only, use "sheetpan" as the closest match.
 
-  const text = await callClaude([{ role: "user", content: prompt }], 1500);
+Return ONLY this JSON, no other text:
+{"name":"Exact Recipe Name","method":"crockpot","toddlerFriendly":true,"protein":"Chicken","cookTime":"4-6 hrs","servings":4,"ingredients":["6 bone-in skin-on chicken thighs","2 tbsp olive oil","4 cloves garlic minced","1 cup chicken broth","¼ cup fresh lemon juice","1 tbsp lemon zest","1 tbsp fresh thyme leaves","1 tsp dried oregano","½ tsp crushed red pepper flakes","2 tbsp butter","salt and pepper to taste"],"instructions":["Season chicken with salt and pepper. Sear skin-side down in olive oil 4-5 min until golden. Flip and sear 2 more minutes.","Transfer chicken to crockpot. Whisk together garlic, broth, lemon juice, zest, thyme, oregano, and red pepper flakes. Pour over chicken.","Cook on LOW 4-6 hours or HIGH 2-3 hours until chicken reaches 165°F.","Stir butter into sauce before serving. Garnish with lemon slices and fresh thyme."],"groceries":["6 bone-in chicken thighs","2 tbsp olive oil","4 garlic cloves","1 cup chicken broth","¼ cup lemon juice","1 lemon for zest","fresh thyme","1 tsp dried oregano","2 tbsp butter"]}`
+    : `Generate a complete family-friendly recipe for: "${slug}"
+Method must be "crockpot", "sheetpan", or "instapot". Return ONLY JSON:
+{"name":"Recipe Name","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken thighs","3 tbsp olive oil"],"instructions":["Step 1.","Step 2."],"groceries":["2 lbs chicken thighs","3 tbsp olive oil"]}`;
+
+  const text = await callClaude([{ role: "user", content: prompt }], 2000);
   let meal;
   try { meal = extractJSON(text); }
   catch(e) { throw new Error("Could not read recipe — try a more specific recipe page URL"); }
@@ -606,12 +619,19 @@ function SizePicker({ value, onChange }) {
 }
 
 // ─── Recipe Sheet ─────────────────────────────────────────────────────────────
-function RecipeSheet({ meal, onClose, onEdit }) {
+function RecipeSheet({ meal, onClose, onEdit, plan, onAssign }) {
   const [size, setSize] = useState(1);
+  const [assigned, setAssigned] = useState(null); // day just assigned
   if (!meal) return null;
   const meta = METHOD_META[meal.method] || METHOD_META.sheetpan;
   const baseServings = Number(meal.servings) || 4;
   const scaledServings = Math.round(baseServings * size);
+
+  const handleAssign = (day) => {
+    onAssign(day, meal);
+    setAssigned(day);
+    setTimeout(() => setAssigned(null), 2000);
+  };
 
   return (
     <Sheet onClose={onClose}>
@@ -681,7 +701,7 @@ function RecipeSheet({ meal, onClose, onEdit }) {
         </div>
 
         {/* Instructions */}
-        <div>
+        <div style={{marginBottom:24}}>
           <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Instructions</div>
           {(meal.instructions||[]).map((step,i)=>(
             <div key={i} style={{display:"flex",alignItems:"flex-start",padding:"10px 0",borderBottom:`1px solid ${A.border}`}}>
@@ -690,6 +710,44 @@ function RecipeSheet({ meal, onClose, onEdit }) {
             </div>
           ))}
         </div>
+
+        {/* Add to Week */}
+        {plan && onAssign && (
+          <div style={{borderTop:`2px solid ${A.border}`,paddingTop:20}}>
+            <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:12}}>
+              Add to Week
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {DAYS.map(day => {
+                const current = plan[day];
+                const isThisMeal = current?.id === meal.id;
+                const isJustAssigned = assigned === day;
+                const isEmpty = !current;
+                return (
+                  <button key={day} onClick={()=>handleAssign(day)}
+                    style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+                      padding:"11px 14px",borderRadius:12,cursor:"pointer",
+                      border:`1.5px solid ${isThisMeal||isJustAssigned ? A.teal : isEmpty ? A.teal+"44" : A.border}`,
+                      background:isThisMeal||isJustAssigned ? A.tealSoft : isEmpty ? A.surface2 : A.surface,
+                      transition:"all 0.15s"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontSize:11,fontWeight:700,color:A.textMuted,letterSpacing:1.5,
+                        textTransform:"uppercase",minWidth:36}}>{day.slice(0,3)}</span>
+                      <span style={{fontSize:13,color:isThisMeal||isJustAssigned?A.teal:isEmpty?A.textMuted:A.textSecondary,
+                        fontStyle:isEmpty?"italic":"normal",fontWeight:isThisMeal||isJustAssigned?600:400}}>
+                        {isJustAssigned ? "✓ Added!" : isThisMeal ? `✓ ${meal.name}` : isEmpty ? "Open" : current.name}
+                      </span>
+                    </div>
+                    <span style={{fontSize:12,fontWeight:700,
+                      color:isThisMeal||isJustAssigned?A.teal:isEmpty?A.teal:A.textMuted}}>
+                      {isThisMeal||isJustAssigned ? "" : isEmpty ? "+ Add" : "Replace"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </Sheet>
   );
@@ -1360,7 +1418,8 @@ export default function MealPlanner() {
       )}
 
       {/* Overlays */}
-      {viewRecipe&&<RecipeSheet meal={viewRecipe} onClose={()=>setViewRecipe(null)} onEdit={m=>{setEditRecipe(m);}}/>}
+      {viewRecipe&&<RecipeSheet meal={viewRecipe} onClose={()=>setViewRecipe(null)} onEdit={m=>{setEditRecipe(m);}}
+        plan={plan} onAssign={(day,meal)=>{swapManual(day,meal);}}/>}
       {editRecipe&&<EditRecipeModal meal={editRecipe} onSave={saveEditedRecipe} onClose={()=>setEditRecipe(null)}/>}
       {addModal&&<AddRecipeModal onAdd={addRecipe} onClose={()=>setAddModal(false)}/>}
       {rateModal&&<RateModal meal={rateModal} existing={ratings[rateModal.name]} onSave={saveRating} onClose={()=>setRateModal(null)}/>}
