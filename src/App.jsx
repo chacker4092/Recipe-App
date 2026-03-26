@@ -396,47 +396,76 @@ Every ingredient must have a quantity and unit.`;
 }
 
 async function fetchRecipeFromUrl(url) {
-  // Step 1: Fetch the actual page content via our Vercel proxy
+  // Step 1: Fetch the actual page content via Vercel proxy
   let pageText = "";
+  let pageSource = "";
   try {
-    const proxyEndpoint = window.location.hostname === "localhost" ? null : "/api/claude";
-    if (proxyEndpoint) {
-      const pageRes = await fetch(proxyEndpoint, {
+    const isDeployed = window.location.hostname !== "localhost";
+    if (isDeployed) {
+      const pageRes = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fetchUrl: url }),
       });
       const pageData = await pageRes.json();
       pageText = pageData.text || "";
+      pageSource = pageData.source || "html";
     }
-  } catch(e) {
-    // If page fetch fails, fall back to slug-based generation
-  }
+  } catch(e) { /* fall through to slug-based */ }
 
-  // Step 2: Send page content (or URL slug fallback) to Claude
   const slug = url.replace(/https?:\/\/[^/]+\//,"").replace(/[^a-z0-9]+/gi," ").trim().slice(0, 100);
+  const hasContent = pageText.length > 150;
 
-  const prompt = pageText.length > 200
-    ? `You are a recipe extractor. Extract the recipe from this webpage content and return it as JSON.
+  // Step 2: Build prompt based on what we got
+  const exampleJSON = `{"name":"Steak Bites with Sweet Potatoes","method":"sheetpan","toddlerFriendly":true,"protein":"Beef","cookTime":"45 min","servings":4,"ingredients":["1 lb flat iron steak diced into 1 inch pieces","1 large sweet potato diced into 1 inch pieces","3 tbsp olive oil divided","2 cloves garlic minced","2 bell peppers seeded and diced","4 green onions thinly sliced","2 tbsp coconut aminos","2 tsp cracked black pepper","1 tsp sea salt","2 tbsp fresh cilantro chopped"],"instructions":["Microwave diced sweet potato with 1 tsp salt covered 4-6 minutes until just tender.","Heat 2 tbsp oil in skillet over high heat. Sear steak in single layer turning every 2 min until browned, about 10 min. Remove to plate.","Add remaining oil, add sweet potatoes and saute until browned 3-4 min.","Make well in center, add garlic and saute 1 min. Add peppers and scallions, saute 3-4 min.","Return steak to pan, add coconut aminos, toss and cook 1-2 min until liquid evaporates. Top with pepper and cilantro."],"groceries":["1 lb flat iron steak","1 large sweet potato","3 tbsp olive oil","2 garlic cloves","2 bell peppers","4 green onions","2 tbsp coconut aminos","fresh cilantro"]}`;
 
-WEBPAGE CONTENT:
-${pageText.slice(0, 6000)}
+  let prompt;
+  if (hasContent && pageSource === "structured") {
+    // Best case: we have clean structured JSON-LD data
+    prompt = `Extract this recipe data into the required JSON format. The data is already structured — copy ingredients and instructions EXACTLY as they appear, do not summarize or invent.
 
-Extract EVERY ingredient exactly as written, all steps in full detail, and the correct cook time.
-Choose the closest method: "crockpot" (slow cooker), "sheetpan" (oven/roasting), or "instapot" (pressure cooker).
-If the recipe uses a skillet or stovetop only, use "sheetpan" as the closest match.
+RECIPE DATA:
+${pageText.slice(0, 5000)}
 
-Return ONLY this JSON, no other text:
-{"name":"Exact Recipe Name","method":"crockpot","toddlerFriendly":true,"protein":"Chicken","cookTime":"4-6 hrs","servings":4,"ingredients":["6 bone-in skin-on chicken thighs","2 tbsp olive oil","4 cloves garlic minced","1 cup chicken broth","¼ cup fresh lemon juice","1 tbsp lemon zest","1 tbsp fresh thyme leaves","1 tsp dried oregano","½ tsp crushed red pepper flakes","2 tbsp butter","salt and pepper to taste"],"instructions":["Season chicken with salt and pepper. Sear skin-side down in olive oil 4-5 min until golden. Flip and sear 2 more minutes.","Transfer chicken to crockpot. Whisk together garlic, broth, lemon juice, zest, thyme, oregano, and red pepper flakes. Pour over chicken.","Cook on LOW 4-6 hours or HIGH 2-3 hours until chicken reaches 165°F.","Stir butter into sauce before serving. Garnish with lemon slices and fresh thyme."],"groceries":["6 bone-in chicken thighs","2 tbsp olive oil","4 garlic cloves","1 cup chicken broth","¼ cup lemon juice","1 lemon for zest","fresh thyme","1 tsp dried oregano","2 tbsp butter"]}`
-    : `Generate a complete family-friendly recipe for: "${slug}"
-Method must be "crockpot", "sheetpan", or "instapot". Return ONLY JSON:
-{"name":"Recipe Name","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken thighs","3 tbsp olive oil"],"instructions":["Step 1.","Step 2."],"groceries":["2 lbs chicken thighs","3 tbsp olive oil"]}`;
+Rules:
+- Copy every ingredient exactly with its quantity and unit
+- Copy each instruction step in full detail
+- method must be "crockpot" (slow cooker), "sheetpan" (oven/skillet/stovetop), or "instapot" (pressure cooker)
+- toddlerFriendly: true if mild/simple ingredients, false if spicy or complex
+- groceries should list each ingredient without prep instructions (e.g. "1 lb flat iron steak" not "1 lb flat iron steak, diced into 1-inch pieces")
+- servings must be a plain number
+
+Return ONLY this JSON, nothing else:
+${exampleJSON}`;
+  } else if (hasContent) {
+    // We have HTML-stripped text — guide Claude to find the recipe within it
+    prompt = `Extract the recipe from this webpage text. Find the ingredients list and instructions, then convert to JSON.
+Copy ingredients and steps EXACTLY as written on the page — do not substitute, simplify, or invent ingredients.
+
+WEBPAGE TEXT:
+${pageText.slice(0, 5000)}
+
+Rules:
+- Extract EVERY ingredient with exact quantity and unit as listed on the page
+- Include ALL steps with full detail
+- method: "crockpot" (slow cooker), "sheetpan" (oven/skillet/stovetop), "instapot" (pressure cooker)
+- groceries: same ingredients but without prep descriptors
+- servings: plain number
+
+Return ONLY valid JSON, starting with {:
+${exampleJSON}`;
+  } else {
+    // Fallback: generate from URL slug
+    prompt = `Generate a complete family-friendly recipe for: "${slug}"
+Use exact realistic quantities. Method must be "crockpot", "sheetpan", or "instapot".
+Return ONLY JSON: ${exampleJSON}`;
+  }
 
   const text = await callClaude([{ role: "user", content: prompt }], 2000);
   let meal;
   try { meal = extractJSON(text); }
-  catch(e) { throw new Error("Could not read recipe — try a more specific recipe page URL"); }
-  if (!meal.name) throw new Error("Recipe name missing");
+  catch(e) { throw new Error("Could not parse recipe. Try a direct recipe page URL (not a search or category page)."); }
+  if (!meal?.name) throw new Error("Recipe name missing from response");
   if (!["crockpot","sheetpan","instapot"].includes(meal.method)) meal.method = "sheetpan";
   return { ...meal, id: `custom_${Date.now()}`, source: "custom", recipeUrl: url, servings: Number(meal.servings) || 4 };
 }
