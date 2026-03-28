@@ -1624,33 +1624,6 @@ export default function MealPlanner() {
                   </div>
                 </div>
 
-                {/* Plan New Week card — top of plan tab */}
-                <div style={{background:A.surface,borderRadius:16,padding:16,marginBottom:14,
-                  border:`1px solid ${A.border}`,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
-                  <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",
-                    fontWeight:700,marginBottom:12}}>Plan a New Week</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    <button onClick={()=>generateWeek(true)}
-                      style={{padding:"14px 10px",background:A.teal,color:"#fff",border:"none",
-                        borderRadius:12,cursor:"pointer",fontSize:13,fontWeight:700,
-                        display:"flex",flexDirection:"column",alignItems:"center",gap:5,
-                        boxShadow:`0 3px 12px ${A.teal}44`}}>
-                      <span style={{fontSize:22}}>✨</span>
-                      <span>AI Plan for Me</span>
-                      <span style={{fontSize:10,fontWeight:400,opacity:0.85}}>Claude picks 7 meals</span>
-                    </button>
-                    <button onClick={()=>setPlanModal(true)}
-                      style={{padding:"14px 10px",background:A.surface2,color:A.textPrimary,
-                        border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",
-                        fontSize:13,fontWeight:700,
-                        display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
-                      <span style={{fontSize:22}}>📝</span>
-                      <span>Plan From Scratch</span>
-                      <span style={{fontSize:10,color:A.textMuted,fontWeight:400}}>Pick meals yourself</span>
-                    </button>
-                  </div>
-                </div>
-
                 {aiError&&(
                   <div style={{background:"#FFF8EC",border:`1px solid ${A.amber}44`,borderRadius:12,padding:"10px 14px",marginBottom:12,fontSize:12,color:A.amber}}>
                     ⚠️ AI unavailable — showing curated meals
