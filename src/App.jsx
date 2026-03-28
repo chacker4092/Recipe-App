@@ -1275,8 +1275,10 @@ export default function MealPlanner() {
   const [editRecipe, setEditRecipe]   = useState(null);   // meal being edited
   const [manualItems, setManualItems] = useState([]);      // manually added grocery items
   const [manualInput, setManualInput] = useState("");
+  const [deletedSeeds, setDeletedSeeds] = useState([]);   // ids of deleted seed meals
+  const [planModal, setPlanModal]     = useState(false);  // new week modal
 
-  const allRecipes = [...SEED_MEALS, ...myRecipes];
+  const allRecipes = [...SEED_MEALS.filter(m=>!deletedSeeds.includes(m.id)), ...myRecipes];
 
   useEffect(()=>{
     const d = store.get("data") || {};
@@ -1409,8 +1411,14 @@ export default function MealPlanner() {
     setAddModal(false); showToast(`Added "${meal.name}"`);
   };
 
-  const deleteCustom = (id) => {
-    const u = myRecipes.filter(m=>m.id!==id); setMyRecipes(u); persist(savedWeeks, u, ratings);
+  const deleteRecipe = (id) => {
+    const isSeed = SEED_MEALS.some(m=>m.id===id);
+    if (isSeed) {
+      setDeletedSeeds(p=>[...p, id]);
+    } else {
+      const u = myRecipes.filter(m=>m.id!==id); setMyRecipes(u); persist(savedWeeks, u, ratings);
+    }
+    showToast("Recipe removed");
   };
 
   const saveRating = (draft) => {
@@ -1452,6 +1460,50 @@ export default function MealPlanner() {
       {editRecipe&&<EditRecipeModal meal={editRecipe} onSave={saveEditedRecipe} onClose={()=>setEditRecipe(null)}/>}
       {addModal&&<AddRecipeModal onAdd={addRecipe} onClose={()=>setAddModal(false)}/>}
       {rateModal&&<RateModal meal={rateModal} existing={ratings[rateModal.name]} onSave={saveRating} onClose={()=>setRateModal(null)}/>}
+
+      {/* Plan From Scratch modal */}
+      {planModal&&(
+        <Modal onClose={()=>setPlanModal(false)}>
+          <div style={{padding:"20px 20px 28px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+              <div style={{fontSize:18,fontWeight:700,color:A.textPrimary}}>📝 Plan From Scratch</div>
+              <button onClick={()=>setPlanModal(false)} style={{background:A.surface3,border:"none",borderRadius:"50%",width:34,height:34,cursor:"pointer",fontSize:18,color:A.textSecondary}}>×</button>
+            </div>
+            <div style={{fontSize:13,color:A.textSecondary,marginBottom:16,lineHeight:1.6}}>
+              Tap a day below, then pick a meal from your recipe library to assign it.
+            </div>
+            {DAYS.map(day=>{
+              const meal = plan[day];
+              const meta = meal ? (METHOD_META[meal.method]||METHOD_META.sheetpan) : null;
+              return (
+                <div key={day} style={{marginBottom:8}}>
+                  <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:4}}>{day}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {allRecipes.map(r=>{
+                      const isSet = plan[day]?.id===r.id;
+                      return (
+                        <button key={r.id} onClick={()=>swapManual(day,r)}
+                          style={{padding:"5px 10px",borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:600,
+                            background:isSet?A.teal:A.surface3,
+                            color:isSet?"#fff":A.textSecondary,
+                            border:`1px solid ${isSet?A.teal:A.border}`,
+                            transition:"all 0.15s"}}>
+                          {isSet?"✓ ":""}{r.name.length>22?r.name.slice(0,22)+"…":r.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            <button onClick={()=>setPlanModal(false)}
+              style={{width:"100%",marginTop:16,padding:14,background:A.teal,color:"#fff",
+                border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700}}>
+              Done ✓
+            </button>
+          </div>
+        </Modal>
+      )}
       {swapSheet&&swapSheet.mode==="manual"&&(
         <ManualSwapSheet day={swapSheet.day} allRecipes={allRecipes} currentMeal={plan[swapSheet.day]}
           onSwap={m=>swapManual(swapSheet.day,m)} onClose={()=>setSwapSheet(null)}/>
@@ -1545,6 +1597,60 @@ export default function MealPlanner() {
               </div>
             ):(
               <>
+                {/* Plan New Week card — top of plan tab */}
+                <div style={{background:A.surface,borderRadius:16,padding:16,marginBottom:14,
+                  border:`1px solid ${A.border}`,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+                  <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",
+                    fontWeight:700,marginBottom:12}}>Plan a New Week</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <button onClick={()=>generateWeek(true)}
+                      style={{padding:"14px 10px",background:A.teal,color:"#fff",border:"none",
+                        borderRadius:12,cursor:"pointer",fontSize:13,fontWeight:700,
+                        display:"flex",flexDirection:"column",alignItems:"center",gap:5,
+                        boxShadow:`0 3px 12px ${A.teal}44`}}>
+                      <span style={{fontSize:22}}>✨</span>
+                      <span>AI Plan for Me</span>
+                      <span style={{fontSize:10,fontWeight:400,opacity:0.85}}>Claude picks 7 meals</span>
+                    </button>
+                    <button onClick={()=>setPlanModal(true)}
+                      style={{padding:"14px 10px",background:A.surface2,color:A.textPrimary,
+                        border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",
+                        fontSize:13,fontWeight:700,
+                        display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:22}}>📝</span>
+                      <span>Plan From Scratch</span>
+                      <span style={{fontSize:10,color:A.textMuted,fontWeight:400}}>Pick meals yourself</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Plan New Week card — top of plan tab */}
+                <div style={{background:A.surface,borderRadius:16,padding:16,marginBottom:14,
+                  border:`1px solid ${A.border}`,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+                  <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",
+                    fontWeight:700,marginBottom:12}}>Plan a New Week</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <button onClick={()=>generateWeek(true)}
+                      style={{padding:"14px 10px",background:A.teal,color:"#fff",border:"none",
+                        borderRadius:12,cursor:"pointer",fontSize:13,fontWeight:700,
+                        display:"flex",flexDirection:"column",alignItems:"center",gap:5,
+                        boxShadow:`0 3px 12px ${A.teal}44`}}>
+                      <span style={{fontSize:22}}>✨</span>
+                      <span>AI Plan for Me</span>
+                      <span style={{fontSize:10,fontWeight:400,opacity:0.85}}>Claude picks 7 meals</span>
+                    </button>
+                    <button onClick={()=>setPlanModal(true)}
+                      style={{padding:"14px 10px",background:A.surface2,color:A.textPrimary,
+                        border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",
+                        fontSize:13,fontWeight:700,
+                        display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:22}}>📝</span>
+                      <span>Plan From Scratch</span>
+                      <span style={{fontSize:10,color:A.textMuted,fontWeight:400}}>Pick meals yourself</span>
+                    </button>
+                  </div>
+                </div>
+
                 {aiError&&(
                   <div style={{background:"#FFF8EC",border:`1px solid ${A.amber}44`,borderRadius:12,padding:"10px 14px",marginBottom:12,fontSize:12,color:A.amber}}>
                     ⚠️ AI unavailable — showing curated meals
@@ -1692,12 +1798,6 @@ export default function MealPlanner() {
                   );
                 })}
 
-                <button onClick={()=>generateWeek(true)}
-                  style={{width:"100%",padding:16,background:A.teal,color:"#fff",border:"none",borderRadius:14,
-                    cursor:"pointer",fontSize:15,fontWeight:700,marginBottom:10,
-                    boxShadow:`0 4px 20px ${A.teal}44`}}>
-                  ✨ Generate New AI Plan
-                </button>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                   <button onClick={()=>setSaveModal(true)} style={{padding:13,background:A.surface,border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",fontSize:13,color:A.textPrimary,fontWeight:600,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>💾 Save Week</button>
                   <button onClick={()=>setTab("groceries")} style={{padding:13,background:A.surface,border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",fontSize:13,color:A.textPrimary,fontWeight:600,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>🛒 View List</button>
@@ -1846,13 +1946,13 @@ export default function MealPlanner() {
                           </button>
                         )})}
                       </div>
-                      {meal.source!=="builtin"&&(
-                        <button onClick={()=>deleteCustom(meal.id)}
-                          style={{background:A.surface3,color:A.red,border:`1px solid ${A.red}44`,
-                            borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>
-                          🗑 Remove
-                        </button>
-                      )}
+                      <button onClick={()=>{
+                          if (window.confirm(`Remove "${meal.name}" from your library?`)) deleteRecipe(meal.id);
+                        }}
+                        style={{background:A.surface3,color:A.red,border:`1px solid ${A.red}44`,
+                          borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>
+                        🗑 Remove
+                      </button>
                     </div>
                   </div>
                 </div>
