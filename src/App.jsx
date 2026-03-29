@@ -212,7 +212,7 @@ function parseIngredient(raw) {
   // 2. Pull unit (whole-word only)
   const unitMatch = s.match(UNIT_RE);
   let unit = "";
-  if (unitMatch) { unit = unitMatch[1].toLowerCase(); s = s.slice(unitMatch[1].length).trim(); }
+  if (unitMatch) { unit = normalizeUnit(unitMatch[1]); s = s.slice(unitMatch[1].length).trim(); }
   // 3. Clean name: strip parentheticals, prep words, leading punctuation
   let name = s.replace(/\(.*?\)/g,"").replace(/^[,.\s]+/,"").replace(/,.*$/,"").toLowerCase().trim();
   name = name.replace(/(diced|minced|sliced|chopped|cubed|shredded|grated|trimmed|peeled|halved|quartered|crushed|cooked|drained|rinsed|thawed|softened|melted|boneless|skinless|bone-in|low.sodium|unsalted|whole|fresh|dried|large|medium|small|about|each|to serve|for serving)/gi,"")
@@ -221,7 +221,8 @@ function parseIngredient(raw) {
 }
 
 function ingredientKey(raw) {
-  return parseIngredient(raw).name;
+  const { unit, name } = parseIngredient(raw);
+  return `${unit}|${name}`;
 }
 
 function buildGroceriesWithPortions(plan, portionSizes = {}) {
@@ -232,8 +233,8 @@ function buildGroceriesWithPortions(plan, portionSizes = {}) {
     const mult = portionSizes[day] || 1;
     m.groceries.forEach(raw => {
       const { qty, unit, name } = parseIngredient(raw);
-      const key = name;
-      if (!key) return;
+      const key = ingredientKey(raw);
+      if (!key || !name) return;
       const scaledQty = qty * mult;
       if (!acc[key]) {
         acc[key] = { qty: scaledQty, unit, name, rawName: raw };
@@ -648,9 +649,9 @@ function SizePicker({ value, onChange }) {
 }
 
 // ─── Recipe Sheet ─────────────────────────────────────────────────────────────
-function RecipeSheet({ meal, onClose, onEdit, plan, onAssign }) {
+function RecipeSheet({ meal, onClose, onEdit, plan, onAssign, pickForDay, onPickAssign }) {
   const [size, setSize] = useState(1);
-  const [assigned, setAssigned] = useState(null); // day just assigned
+  const [assigned, setAssigned] = useState(null);
   if (!meal) return null;
   const meta = METHOD_META[meal.method] || METHOD_META.sheetpan;
   const baseServings = Number(meal.servings) || 4;
@@ -665,6 +666,23 @@ function RecipeSheet({ meal, onClose, onEdit, plan, onAssign }) {
   return (
     <Sheet onClose={onClose}>
       <div style={{padding:"16px 20px 36px"}}>
+
+        {/* ── Pick mode banner — shown when opened from Start From Scratch ── */}
+        {pickForDay&&(
+          <div style={{background:A.teal,borderRadius:12,padding:"12px 16px",marginBottom:16,
+            display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:12,color:"rgba(255,255,255,0.85)",marginBottom:2}}>Adding to</div>
+              <div style={{fontSize:15,fontWeight:700,color:"#fff"}}>{pickForDay}</div>
+            </div>
+            <button onClick={()=>{ onPickAssign(pickForDay, meal); onClose(); }}
+              style={{background:"#fff",border:"none",borderRadius:10,padding:"9px 18px",
+                cursor:"pointer",fontSize:13,fontWeight:800,color:A.teal}}>
+              + Add to {pickForDay.slice(0,3)}
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
           <div style={{flex:1,paddingRight:12}}>
@@ -1277,6 +1295,7 @@ export default function MealPlanner() {
   const [manualInput, setManualInput] = useState("");
   const [deletedSeeds, setDeletedSeeds] = useState([]);   // ids of deleted seed meals
   const [planModal, setPlanModal]     = useState(false);  // new week modal
+  const [pickForDay, setPickForDay]   = useState(null);   // day we're picking a recipe for
 
   const allRecipes = [...SEED_MEALS.filter(m=>!deletedSeeds.includes(m.id)), ...myRecipes];
 
@@ -1363,9 +1382,10 @@ export default function MealPlanner() {
   };
 
   const swapManual = (day, meal) => {
-    const newPlan = { ...plan, [day]: meal };
-    applyPlan(newPlan);
-    showToast(`${day} updated!`);
+    // Use setPlan directly (not applyPlan) so we don't wipe skipped/portion states
+    setPlan(p => ({ ...p, [day]: meal }));
+    setChecked({});
+    showToast(`Added to ${day}! ✓`);
   };
 
   const swapDays = (dayA, dayB) => {
@@ -1456,7 +1476,9 @@ export default function MealPlanner() {
 
       {/* Overlays */}
       {viewRecipe&&<RecipeSheet meal={viewRecipe} onClose={()=>setViewRecipe(null)} onEdit={m=>{setEditRecipe(m);}}
-        plan={plan} onAssign={(day,meal)=>{swapManual(day,meal);}}/>}
+        plan={plan} onAssign={(day,meal)=>{swapManual(day,meal);}}
+        pickForDay={pickForDay}
+        onPickAssign={(day,meal)=>{ swapManual(day,meal); setPickForDay(null); }}/>}
       {editRecipe&&<EditRecipeModal meal={editRecipe} onSave={saveEditedRecipe} onClose={()=>setEditRecipe(null)}/>}
       {addModal&&<AddRecipeModal onAdd={addRecipe} onClose={()=>setAddModal(false)}/>}
       {rateModal&&<RateModal meal={rateModal} existing={ratings[rateModal.name]} onSave={saveRating} onClose={()=>setRateModal(null)}/>}
@@ -1603,6 +1625,24 @@ export default function MealPlanner() {
                   <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",
                     fontWeight:700,marginBottom:12}}>Plan a New Week</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <button onClick={()=>{
+                        // Clear the plan so all days are blank — user picks from library
+                        const blank = {};
+                        DAYS.forEach(d => { blank[d] = null; });
+                        setPlan(blank);
+                        setSkippedDays({});
+                        setPortionSizes({});
+                        setChecked({});
+                        showToast("Week cleared — tap Recipes to fill it in!");
+                      }}
+                      style={{padding:"14px 10px",background:A.surface2,color:A.textPrimary,
+                        border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",
+                        fontSize:13,fontWeight:700,
+                        display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:22}}>📝</span>
+                      <span>Start From Scratch</span>
+                      <span style={{fontSize:10,color:A.textMuted,fontWeight:400}}>I'll pick the meals</span>
+                    </button>
                     <button onClick={()=>generateWeek(true)}
                       style={{padding:"14px 10px",background:A.teal,color:"#fff",border:"none",
                         borderRadius:12,cursor:"pointer",fontSize:13,fontWeight:700,
@@ -1611,15 +1651,6 @@ export default function MealPlanner() {
                       <span style={{fontSize:22}}>✨</span>
                       <span>AI Plan for Me</span>
                       <span style={{fontSize:10,fontWeight:400,opacity:0.85}}>Claude picks 7 meals</span>
-                    </button>
-                    <button onClick={()=>setPlanModal(true)}
-                      style={{padding:"14px 10px",background:A.surface2,color:A.textPrimary,
-                        border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",
-                        fontSize:13,fontWeight:700,
-                        display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
-                      <span style={{fontSize:22}}>📝</span>
-                      <span>Plan From Scratch</span>
-                      <span style={{fontSize:10,color:A.textMuted,fontWeight:400}}>Pick meals yourself</span>
                     </button>
                   </div>
                 </div>
@@ -1641,7 +1672,52 @@ export default function MealPlanner() {
                 )}
 
                 {DAYS.map(day=>{
-                  const meal=plan[day]; if(!meal) return null;
+                  const meal=plan[day];
+
+                  // ── Empty card (Start From Scratch cleared this day) ──
+                  if (!meal) return (
+                    <div key={day} style={{background:A.surface,borderRadius:18,padding:16,marginBottom:12,
+                      border:`2px dashed ${A.border}`,boxShadow:"none"}}>
+                      <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>{day}</div>
+                      {/* If this day has been skipped via the empty card, show the skip input */}
+                      {skippedDays[day]!==undefined && skippedDays[day]!==false ? (
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <span style={{fontSize:22,flexShrink:0}}>🥡</span>
+                          <input
+                            value={skippedDays[day]||""}
+                            onChange={e=>setSkippedDays(p=>({...p,[day]:e.target.value}))}
+                            placeholder="What are you ordering? (e.g. Hai Chinese)"
+                            style={{flex:1,background:A.surface3,border:`1px solid ${A.border}`,borderRadius:10,
+                              padding:"9px 12px",fontSize:13,color:A.textPrimary,outline:"none",fontFamily:"inherit"}}
+                          />
+                          <button onClick={()=>setSkippedDays(p=>({...p,[day]:false}))}
+                            style={{background:"transparent",border:"none",cursor:"pointer",
+                              fontSize:11,color:A.teal,fontWeight:600,whiteSpace:"nowrap"}}>
+                            ↩ Undo
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            <span style={{fontSize:22}}>🍽️</span>
+                            <div style={{fontSize:13,fontWeight:600,color:A.textMuted}}>No meal planned</div>
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
+                            <button onClick={()=>{ setPickForDay(day); setTab("library"); }}
+                              style={{background:A.tealSoft,border:`1px solid ${A.teal}44`,borderRadius:8,
+                                padding:"6px 11px",cursor:"pointer",fontSize:11,color:A.teal,fontWeight:700,whiteSpace:"nowrap"}}>
+                              + Add
+                            </button>
+                            <button onClick={()=>setSkippedDays(p=>({...p,[day]:""}))}
+                              style={{background:"transparent",border:`1px solid ${A.border}`,borderRadius:8,
+                                padding:"6px 11px",cursor:"pointer",fontSize:11,color:A.textMuted,fontWeight:500,whiteSpace:"nowrap"}}>
+                              🥡 Skip
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
                   const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
                   const rating=ratings[meal.name];
                   const isSwapping=swappingDay===day;
@@ -1716,18 +1792,11 @@ export default function MealPlanner() {
                         </div>
                         {/* Action column */}
                         <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
-                          <button onClick={()=>swapWithAI(day)} disabled={!!swappingDay}
-                            style={{background:A.surface3,border:`1px solid ${A.border}`,borderRadius:8,padding:"6px 11px",
-                              cursor:"pointer",fontSize:11,color:A.teal,fontWeight:600,
-                              opacity:swappingDay&&!isSwapping?.4:1,whiteSpace:"nowrap"}}>
-                            {isSwapping?"...":"✨ AI Swap"}
-                          </button>
                           <button onClick={()=>setSwapSheet({day,mode:"manual"})} disabled={!!swappingDay}
                             style={{background:A.surface3,border:`1px solid ${A.border}`,borderRadius:8,padding:"6px 11px",
-                              cursor:"pointer",fontSize:11,color:A.textSecondary,fontWeight:600,whiteSpace:"nowrap"}}>
-                            ☰ Pick
+                              cursor:"pointer",fontSize:11,color:A.teal,fontWeight:600,whiteSpace:"nowrap"}}>
+                            ☰ Change
                           </button>
-
                           <button onClick={()=>setSkippedDays(p=>({...p,[day]:""}))}
                             style={{background:"transparent",border:`1px solid ${A.border}`,borderRadius:8,padding:"6px 11px",
                               cursor:"pointer",fontSize:11,color:A.textMuted,fontWeight:500,whiteSpace:"nowrap"}}>
@@ -1880,9 +1949,28 @@ export default function MealPlanner() {
         )}
 
         {/* LIBRARY TAB */}
-        {/* LIBRARY TAB */}
         {tab==="library"&&(
           <>
+            {/* Banner when picking for a specific day */}
+            {pickForDay&&(
+              <div style={{background:A.teal,borderRadius:14,padding:"12px 16px",marginBottom:14,
+                display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#fff"}}>
+                    Picking meal for <strong>{pickForDay}</strong>
+                  </div>
+                  <div style={{fontSize:11,color:"rgba(255,255,255,0.8)",marginTop:2}}>
+                    Tap any recipe below to add it
+                  </div>
+                </div>
+                <button onClick={()=>{ setPickForDay(null); setTab("plan"); }}
+                  style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:8,
+                    padding:"6px 12px",cursor:"pointer",fontSize:12,color:"#fff",fontWeight:700}}>
+                  ✕ Cancel
+                </button>
+              </div>
+            )}
+
             <button onClick={()=>setAddModal(true)}
               style={{width:"100%",padding:14,background:A.teal,color:"#fff",border:"none",borderRadius:14,
                 cursor:"pointer",fontSize:14,fontWeight:700,marginBottom:14}}>
@@ -1891,11 +1979,18 @@ export default function MealPlanner() {
             <div style={{fontSize:11,color:A.textMuted,marginBottom:12,letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{allRecipes.length} Recipes</div>
             {allRecipes.map(meal=>{
               const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
+              const isAssignedToPickDay = pickForDay && plan[pickForDay]?.id === meal.id;
               return(
-                <div key={meal.id} style={{background:A.surface,borderRadius:14,padding:"14px 16px",marginBottom:8,border:`1px solid ${A.border}`,boxShadow:"0 1px 3px rgba(0,0,0,0.05)"}}>
+                <div key={meal.id}
+                  onClick={undefined}
+                  style={{background:isAssignedToPickDay?A.tealSoft:A.surface,borderRadius:14,padding:"14px 16px",marginBottom:8,
+                    border:`1px solid ${isAssignedToPickDay?A.teal:pickForDay?A.teal+"44":A.border}`,
+                    boxShadow:"0 1px 3px rgba(0,0,0,0.05)",
+                    cursor:pickForDay?"pointer":"default",
+                    transition:"all 0.15s"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div style={{flex:1,cursor:"pointer"}} onClick={()=>setViewRecipe(meal)}>
-                      <div style={{fontWeight:600,fontSize:14,color:A.textPrimary,marginBottom:6,lineHeight:1.3}}>{meal.name}</div>
+                      <div style={{fontWeight:600,fontSize:14,color:A.textPrimary,lineHeight:1.3,marginBottom:6}}>{meal.name}</div>
                       <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                         <Pill color={meta.color} bg={meta.bg}>{meta.emoji} {meta.label}</Pill>
                         {meal.toddlerFriendly&&<Pill color={A.amber} bg="#FFF8E6">🐣</Pill>}
@@ -1903,6 +1998,8 @@ export default function MealPlanner() {
                         {meal.cookTime&&<Pill color={A.textMuted} bg={A.surface3}>⏱ {meal.cookTime}</Pill>}
                       </div>
                     </div>
+                    {/* Day chips — only show when NOT in pick mode */}
+                    {!pickForDay&&(
                     <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:12}}>
                       <div style={{display:"flex",gap:3,flexWrap:"wrap",maxWidth:160,justifyContent:"flex-end"}}>
                         {DAYS.map(d=>{
@@ -1919,7 +2016,7 @@ export default function MealPlanner() {
                           </button>
                         )})}
                       </div>
-                      <button onClick={()=>{
+                      <button onClick={e=>{e.stopPropagation();
                           if (window.confirm(`Remove "${meal.name}" from your library?`)) deleteRecipe(meal.id);
                         }}
                         style={{background:A.surface3,color:A.red,border:`1px solid ${A.red}44`,
@@ -1927,6 +2024,24 @@ export default function MealPlanner() {
                         🗑 Remove
                       </button>
                     </div>
+                    )}
+                    {/* In pick mode — View and Add as equal stacked buttons */}
+                    {pickForDay&&(
+                      <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:12,flexShrink:0}}>
+                        <button onClick={e=>{e.stopPropagation();setViewRecipe(meal);}}
+                          style={{background:A.surface3,border:`1px solid ${A.border}`,borderRadius:8,
+                            padding:"6px 11px",cursor:"pointer",fontSize:11,fontWeight:600,
+                            color:A.textSecondary,whiteSpace:"nowrap",width:"100%"}}>
+                          View →
+                        </button>
+                        <button onClick={e=>{e.stopPropagation(); swapManual(pickForDay,meal); setPickForDay(null); setTab("plan");}}
+                          style={{background:A.teal,border:"none",borderRadius:8,padding:"6px 11px",
+                            cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff",
+                            whiteSpace:"nowrap",width:"100%"}}>
+                          + Add
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
