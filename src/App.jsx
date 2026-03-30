@@ -43,9 +43,12 @@ if (typeof document !== "undefined") {
 const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
 const METHOD_META = {
-  crockpot:{ label:"Crockpot",    emoji:"🥘", color:"#C05A3A", bg:"#FBF0EC" },
-  sheetpan:{ label:"Sheet Pan",   emoji:"🍳", color:"#D4600A", bg:"#FEF3EB" },
-  instapot:{ label:"Instant Pot", emoji:"⚡", color:"#0077B6", bg:"#E6F2FA" },
+  crockpot: { label:"Crockpot",    emoji:"🥘", color:"#C05A3A", bg:"#FBF0EC" },
+  sheetpan: { label:"Sheet Pan",   emoji:"🍳", color:"#D4600A", bg:"#FEF3EB" },
+  instapot: { label:"Instant Pot", emoji:"⚡", color:"#0077B6", bg:"#E6F2FA" },
+  onepan:   { label:"One Pan",     emoji:"🫕", color:"#6B7A2A", bg:"#F4F6E8" },
+  stovetop: { label:"Stovetop",    emoji:"🔥", color:"#9B3A8A", bg:"#F8EDF6" },
+  other:    { label:"Other",       emoji:"🍴", color:"#5A6A7A", bg:"#EDF0F3" },
 };
 
 // Grocery categories for grouping
@@ -61,7 +64,7 @@ const GROCERY_CATS = [
 
 // ─── Seed Meals (with full amounts on every ingredient) ───────────────────────
 const SEED_MEALS = [
-  { id:"s1", name:"Crockpot Honey Garlic Chicken", method:"crockpot", toddlerFriendly:true, protein:"Chicken",
+  { id:"s1", name:"Crockpot Honey Garlic Chicken", method:"crockpot", toddlerFriendly:true, protein:"Chicken", cuisine:"Asian",
     source:"builtin", recipeUrl:"", cookTime:"6 hrs", servings:4,
     ingredients:[
       "2 lbs chicken thighs","⅓ cup honey","¼ cup low-sodium soy sauce",
@@ -75,7 +78,7 @@ const SEED_MEALS = [
       "Serve shredded chicken over jasmine rice."],
     groceries:["2 lbs chicken thighs","⅓ cup honey","¼ cup low-sodium soy sauce","4 garlic cloves","2 tbsp ketchup","1 tbsp cornstarch","2 cups jasmine rice"] },
 
-  { id:"s2", name:"Sheet Pan Salmon & Veggies", method:"sheetpan", toddlerFriendly:false, protein:"Salmon",
+  { id:"s2", name:"Sheet Pan Salmon & Veggies", method:"sheetpan", toddlerFriendly:false, protein:"Salmon", cuisine:"American",
     source:"builtin", recipeUrl:"", cookTime:"25 min", servings:4,
     ingredients:[
       "4 salmon fillets (6 oz each)","2 cups broccoli florets","1 cup cherry tomatoes",
@@ -89,7 +92,7 @@ const SEED_MEALS = [
       "Serve immediately."],
     groceries:["4 salmon fillets (6 oz each)","2 cups broccoli florets","1 cup cherry tomatoes","1 bunch asparagus","3 tbsp olive oil","1 lemon","4 garlic cloves"] },
 
-  { id:"s3", name:"Instant Pot Turkey Meatball Soup", method:"instapot", toddlerFriendly:true, protein:"Turkey",
+  { id:"s3", name:"Instant Pot Turkey Meatball Soup", method:"instapot", toddlerFriendly:true, protein:"Turkey", cuisine:"Italian",
     source:"builtin", recipeUrl:"", cookTime:"30 min", servings:6,
     ingredients:[
       "1 lb ground turkey","1 large egg","¼ cup breadcrumbs",
@@ -104,7 +107,7 @@ const SEED_MEALS = [
       "Seal and pressure cook HIGH 8 min. Quick release. Serve topped with Parmesan."],
     groceries:["1 lb ground turkey","1 egg","¼ cup breadcrumbs","6 cups chicken broth","2 cups egg noodles","3 carrots","3 celery stalks","1 onion","Italian seasoning","Parmesan cheese"] },
 
-  { id:"s4", name:"Sheet Pan Chicken Thighs & Sweet Potato", method:"sheetpan", toddlerFriendly:true, protein:"Chicken",
+  { id:"s4", name:"Sheet Pan Chicken Thighs & Sweet Potato", method:"sheetpan", toddlerFriendly:true, protein:"Chicken", cuisine:"American",
     source:"builtin", recipeUrl:"", cookTime:"40 min", servings:4,
     ingredients:[
       "6 bone-in chicken thighs","2 large sweet potatoes, cubed (about 4 cups)",
@@ -118,7 +121,7 @@ const SEED_MEALS = [
       "Roast 35–40 min until chicken is golden and internal temp reaches 165°F."],
     groceries:["6 bone-in chicken thighs","2 large sweet potatoes","2 tbsp olive oil","smoked paprika","garlic powder","fresh rosemary"] },
 
-  { id:"s5", name:"Crockpot Turkey Chili", method:"crockpot", toddlerFriendly:true, protein:"Turkey",
+  { id:"s5", name:"Crockpot Turkey Chili", method:"crockpot", toddlerFriendly:true, protein:"Turkey", cuisine:"Mexican",
     source:"builtin", recipeUrl:"", cookTime:"6 hrs", servings:6,
     ingredients:[
       "1.5 lbs ground turkey","2 cans (15 oz each) kidney beans, drained",
@@ -133,7 +136,7 @@ const SEED_MEALS = [
       "Serve topped with sour cream and shredded cheddar."],
     groceries:["1.5 lbs ground turkey","2 cans kidney beans","2 cans diced tomatoes","1 packet chili seasoning","1 cup frozen corn","1 bell pepper","1 onion","sour cream","shredded cheddar cheese"] },
 
-  { id:"s6", name:"Instant Pot Mac & Cheese (Hidden Veggies)", method:"instapot", toddlerFriendly:true, protein:"None",
+  { id:"s6", name:"Instant Pot Mac & Cheese (Hidden Veggies)", method:"instapot", toddlerFriendly:true, protein:"None", cuisine:"American",
     source:"builtin", recipeUrl:"", cookTime:"20 min", servings:4,
     ingredients:[
       "1 lb elbow pasta","4 cups water","2 cups cauliflower florets",
@@ -365,7 +368,7 @@ Return ONLY a valid JSON array with exactly this structure — no explanation, n
 ]
 
 Rules:
-- method must be exactly "crockpot", "sheetpan", or "instapot"
+- method must be exactly one of: "crockpot", "sheetpan", "instapot", "onepan", "stovetop", or "other"
 - Every ingredient must have a quantity and unit (e.g. "2 tbsp olive oil", not just "olive oil")
 - servings must be a number (4)
 - Return exactly 7 recipes`;
@@ -431,7 +434,7 @@ ${pageText.slice(0, 5000)}
 Rules:
 - Copy every ingredient exactly with its quantity and unit
 - Copy each instruction step in full detail
-- method must be "crockpot" (slow cooker), "sheetpan" (oven/skillet/stovetop), or "instapot" (pressure cooker)
+- method must be "crockpot" (slow cooker), "sheetpan" (oven/roasting), "instapot" (pressure cooker), "onepan" (single pan stovetop), "stovetop" (stovetop), or "other"
 - toddlerFriendly: true if mild/simple ingredients, false if spicy or complex
 - groceries should list each ingredient without prep instructions (e.g. "1 lb flat iron steak" not "1 lb flat iron steak, diced into 1-inch pieces")
 - servings must be a plain number
@@ -449,7 +452,7 @@ ${pageText.slice(0, 5000)}
 Rules:
 - Extract EVERY ingredient with exact quantity and unit as listed on the page
 - Include ALL steps with full detail
-- method: "crockpot" (slow cooker), "sheetpan" (oven/skillet/stovetop), "instapot" (pressure cooker)
+- method: "crockpot", "sheetpan", "instapot", "onepan", "stovetop", or "other"
 - groceries: same ingredients but without prep descriptors
 - servings: plain number
 
@@ -458,7 +461,7 @@ ${exampleJSON}`;
   } else {
     // Fallback: generate from URL slug
     prompt = `Generate a complete family-friendly recipe for: "${slug}"
-Use exact realistic quantities. Method must be "crockpot", "sheetpan", or "instapot".
+Use exact realistic quantities. Method must be "crockpot", "sheetpan", "instapot", "onepan", "stovetop", or "other".
 Return ONLY JSON: ${exampleJSON}`;
   }
 
@@ -467,7 +470,7 @@ Return ONLY JSON: ${exampleJSON}`;
   try { meal = extractJSON(text); }
   catch(e) { throw new Error("Could not parse recipe. Try a direct recipe page URL (not a search or category page)."); }
   if (!meal?.name) throw new Error("Recipe name missing from response");
-  if (!["crockpot","sheetpan","instapot"].includes(meal.method)) meal.method = "sheetpan";
+  if (!Object.keys(METHOD_META).includes(meal.method)) meal.method = "sheetpan";
   return { ...meal, id: `custom_${Date.now()}`, source: "custom", recipeUrl: url, servings: Number(meal.servings) || 4 };
 }
 
@@ -540,7 +543,7 @@ Return ONLY this JSON (no explanation):
     throw new Error(`Could not parse recipe: ${e.message}`);
   }
   if (!meal || !meal.name) throw new Error("Recipe name missing from response");
-  if (!["crockpot","sheetpan","instapot"].includes(meal.method)) meal.method = "sheetpan";
+  if (!Object.keys(METHOD_META).includes(meal.method)) meal.method = "sheetpan";
   return { ...meal, id: `photo_${Date.now()}`, source: "custom", recipeUrl: "", servings: Number(meal.servings) || 4 };
 }
 
@@ -804,6 +807,7 @@ function RecipeSheet({ meal, onClose, onEdit, plan, onAssign, pickForDay, onPick
 function EditRecipeModal({ meal, onSave, onClose }) {
   const [draft, setDraft] = useState({
     ...meal,
+    cuisine: meal.cuisine || "",
     ingredients: [...(meal.ingredients||[])],
     instructions: [...(meal.instructions||[])],
     groceries:    [...(meal.groceries||[])],
@@ -889,12 +893,34 @@ function EditRecipeModal({ meal, onSave, onClose }) {
               <option value="sheetpan">🍳 Sheet Pan</option>
               <option value="crockpot">🥘 Crockpot</option>
               <option value="instapot">⚡ Instant Pot</option>
+              <option value="onepan">🫕 One Pan</option>
+              <option value="stovetop">🔥 Stovetop</option>
+              <option value="other">🍴 Other</option>
             </select>
           </div>
           <div>
             <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Cook Time</div>
             <input value={draft.cookTime||""} onChange={e=>updateField("cookTime",e.target.value)} placeholder="e.g. 30 min" style={inputStyle}/>
           </div>
+        </div>
+
+        {/* Cuisine */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,color:A.teal,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:6}}>Cuisine</div>
+          <select value={draft.cuisine||""} onChange={e=>updateField("cuisine",e.target.value)}
+            style={{...inputStyle,appearance:"none"}}>
+            <option value="">— Select cuisine —</option>
+            <option value="American">🇺🇸 American</option>
+            <option value="Italian">🇮🇹 Italian</option>
+            <option value="Mexican">🌮 Mexican</option>
+            <option value="Asian">🥢 Asian</option>
+            <option value="Mediterranean">🫒 Mediterranean</option>
+            <option value="Indian">🍛 Indian</option>
+            <option value="Middle Eastern">🧆 Middle Eastern</option>
+            <option value="Greek">🫙 Greek</option>
+            <option value="Thai">🌶️ Thai</option>
+            <option value="Other">🍴 Other</option>
+          </select>
         </div>
 
         {/* Servings + Toddler row */}
@@ -1296,19 +1322,28 @@ export default function MealPlanner() {
   const [deletedSeeds, setDeletedSeeds] = useState([]);   // ids of deleted seed meals
   const [planModal, setPlanModal]     = useState(false);  // new week modal
   const [pickForDay, setPickForDay]   = useState(null);   // day we're picking a recipe for
+  const [libraryFilter, setLibraryFilter] = useState("all"); // filter for recipe library
 
   const allRecipes = [...SEED_MEALS.filter(m=>!deletedSeeds.includes(m.id)), ...myRecipes];
 
   useEffect(()=>{
     const d = store.get("data") || {};
-    if (d.savedWeeks) setSavedWeeks(d.savedWeeks);
-    if (d.myRecipes)  setMyRecipes(d.myRecipes);
-    if (d.ratings)    setRatings(d.ratings);
-    generateWeek(false);
+    if (d.savedWeeks)   setSavedWeeks(d.savedWeeks);
+    if (d.myRecipes)    setMyRecipes(d.myRecipes);
+    if (d.ratings)      setRatings(d.ratings);
+    if (d.skippedDays)  setSkippedDays(d.skippedDays);
+    if (d.portionSizes) setPortionSizes(d.portionSizes);
+    if (d.plan && Object.keys(d.plan).length > 0) {
+      // Restore last week's plan — don't overwrite with defaults
+      setPlan(d.plan);
+    } else {
+      // First ever load — seed with default meals
+      generateWeek(false);
+    }
   }, []);
 
-  const persist = (sw=savedWeeks, mr=myRecipes, rt=ratings) =>
-    store.set("data", { savedWeeks:sw, myRecipes:mr, ratings:rt });
+  const persist = (sw=savedWeeks, mr=myRecipes, rt=ratings, pl=plan, sk=skippedDays, ps=portionSizes) =>
+    store.set("data", { savedWeeks:sw, myRecipes:mr, ratings:rt, plan:pl, skippedDays:sk, portionSizes:ps });
 
   const saveEditedRecipe = (updated) => {
     // Update in plan (any day using this recipe by id)
@@ -1332,6 +1367,10 @@ export default function MealPlanner() {
       Object.entries(plan).filter(([day]) => !skippedDays[day])
     );
     setGroceryCats(buildGroceriesWithPortions(activePlan, portionSizes));
+    // Persist plan state so it survives app reloads and deploys
+    if (Object.keys(plan).length > 0) {
+      persist(savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes);
+    }
   }, [plan, skippedDays, portionSizes]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(""), 2500); };
@@ -1341,25 +1380,39 @@ export default function MealPlanner() {
     setSkippedDays({});
     setPortionSizes({});
     setChecked({});
+    persist(savedWeeks, myRecipes, ratings, p, {}, {});
   };
 
   const generateWeek = async (useAI = true) => {
     setLoading(true); setAiError(false);
-    setLoadingMsg(useAI ? "Asking Claude for ideas..." : "Building your week...");
+    setLoadingMsg(useAI ? "Building your week from your recipes..." : "Building your week...");
     try {
       let meals;
       if (useAI) {
-        const exclude = allRecipes.map(r => r.name);
-        meals = await fetchAIMeals(exclude);
+        // If user has enough recipes in their library, shuffle and pick from those
+        if (allRecipes.length >= 7) {
+          meals = shuffle([...allRecipes]).slice(0, 7);
+        } else if (allRecipes.length >= 3) {
+          // Mix library recipes with AI-generated ones to fill the week
+          const libraryPick = shuffle([...allRecipes]);
+          const needed = 7 - libraryPick.length;
+          const existingNames = libraryPick.map(r => r.name);
+          const aiMeals = await fetchAIMeals(existingNames);
+          meals = [...libraryPick, ...aiMeals.slice(0, needed)];
+        } else {
+          // Library too small — generate with AI using library as inspiration
+          const exclude = allRecipes.map(r => r.name);
+          meals = await fetchAIMeals(exclude);
+        }
       } else {
-        meals = shuffle(SEED_MEALS).slice(0, 7);
+        meals = shuffle(allRecipes.length >= 7 ? [...allRecipes] : SEED_MEALS).slice(0, 7);
       }
       const p = {};
-      DAYS.forEach((d, i) => { p[d] = meals[i] || shuffle([...SEED_MEALS])[i % SEED_MEALS.length]; });
+      DAYS.forEach((d, i) => { p[d] = meals[i] || shuffle([...allRecipes])[i % allRecipes.length]; });
       applyPlan(p);
     } catch(e) {
       setAiError(true);
-      const fallback = [...shuffle(SEED_MEALS), ...shuffle(SEED_MEALS)].slice(0, 7);
+      const fallback = [...shuffle(allRecipes), ...shuffle(allRecipes)].slice(0, 7);
       const p = {};
       DAYS.forEach((d,i) => { p[d] = fallback[i]; });
       applyPlan(p);
@@ -1383,19 +1436,24 @@ export default function MealPlanner() {
 
   const swapManual = (day, meal) => {
     // Use setPlan directly (not applyPlan) so we don't wipe skipped/portion states
-    setPlan(p => ({ ...p, [day]: meal }));
+    const newPlan = { ...plan, [day]: meal };
+    setPlan(newPlan);
     setChecked({});
+    persist(savedWeeks, myRecipes, ratings, newPlan, skippedDays, portionSizes);
     showToast(`Added to ${day}! ✓`);
   };
 
   const swapDays = (dayA, dayB) => {
     if (!dayA || !dayB || dayA === dayB) return;
     const newPlan = { ...plan, [dayA]: plan[dayB], [dayB]: plan[dayA] };
-    setPortionSizes(p => ({ ...p, [dayA]: p[dayB]||1, [dayB]: p[dayA]||1 }));
-    setSkippedDays(p => ({ ...p, [dayA]: p[dayB]||false, [dayB]: p[dayA]||false }));
+    const newPortions = { ...portionSizes, [dayA]: portionSizes[dayB]||1, [dayB]: portionSizes[dayA]||1 };
+    const newSkipped  = { ...skippedDays,  [dayA]: skippedDays[dayB]||false, [dayB]: skippedDays[dayA]||false };
+    setPortionSizes(newPortions);
+    setSkippedDays(newSkipped);
     setPlan(newPlan);
     setChecked({});
     setSwapSelectDay(null);
+    persist(savedWeeks, myRecipes, ratings, newPlan, newSkipped, newPortions);
     showToast(`${dayA} & ${dayB} swapped! 🔄`);
   };
 
@@ -1626,22 +1684,22 @@ export default function MealPlanner() {
                     fontWeight:700,marginBottom:12}}>Plan a New Week</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <button onClick={()=>{
-                        // Clear the plan so all days are blank — user picks from library
                         const blank = {};
                         DAYS.forEach(d => { blank[d] = null; });
                         setPlan(blank);
                         setSkippedDays({});
                         setPortionSizes({});
                         setChecked({});
+                        persist(savedWeeks, myRecipes, ratings, blank, {}, {});
                         showToast("Week cleared — tap Recipes to fill it in!");
                       }}
-                      style={{padding:"14px 10px",background:A.surface2,color:A.textPrimary,
-                        border:`1px solid ${A.border}`,borderRadius:12,cursor:"pointer",
-                        fontSize:13,fontWeight:700,
-                        display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+                      style={{padding:"14px 10px",background:A.teal,color:"#fff",border:"none",
+                        borderRadius:12,cursor:"pointer",fontSize:13,fontWeight:700,
+                        display:"flex",flexDirection:"column",alignItems:"center",gap:5,
+                        boxShadow:`0 3px 12px ${A.teal}44`}}>
                       <span style={{fontSize:22}}>📝</span>
                       <span>Start From Scratch</span>
-                      <span style={{fontSize:10,color:A.textMuted,fontWeight:400}}>I'll pick the meals</span>
+                      <span style={{fontSize:10,fontWeight:400,opacity:0.85}}>I'll pick the meals</span>
                     </button>
                     <button onClick={()=>generateWeek(true)}
                       style={{padding:"14px 10px",background:A.teal,color:"#fff",border:"none",
@@ -1976,8 +2034,82 @@ export default function MealPlanner() {
                 cursor:"pointer",fontSize:14,fontWeight:700,marginBottom:14}}>
               + Add Recipe (Link or Photo)
             </button>
-            <div style={{fontSize:11,color:A.textMuted,marginBottom:12,letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{allRecipes.length} Recipes</div>
-            {allRecipes.map(meal=>{
+
+            {/* Filter chips */}
+            {(()=>{
+              const filters = [
+                {id:"all",           label:"All"},
+                // — Protein —
+                {id:"chicken",       label:"🍗 Chicken"},
+                {id:"beef",          label:"🥩 Beef"},
+                {id:"turkey",        label:"🦃 Turkey"},
+                {id:"salmon",        label:"🐟 Fish"},
+                {id:"pork",          label:"🥓 Pork"},
+                {id:"veggie",        label:"🥦 Veggie"},
+                // — Method —
+                {id:"crockpot",      label:"🥘 Crockpot"},
+                {id:"sheetpan",      label:"🍳 Sheet Pan"},
+                {id:"instapot",      label:"⚡ Instant Pot"},
+                {id:"onepan",        label:"🫕 One Pan"},
+                {id:"stovetop",      label:"🔥 Stovetop"},
+                // — Cuisine —
+                {id:"c:American",    label:"🇺🇸 American"},
+                {id:"c:Italian",     label:"🇮🇹 Italian"},
+                {id:"c:Mexican",     label:"🌮 Mexican"},
+                {id:"c:Asian",       label:"🥢 Asian"},
+                {id:"c:Mediterranean",label:"🫒 Mediterranean"},
+                {id:"c:Indian",      label:"🍛 Indian"},
+                {id:"c:Middle Eastern",label:"🧆 Middle Eastern"},
+                {id:"c:Greek",       label:"🫙 Greek"},
+                {id:"c:Thai",        label:"🌶️ Thai"},
+                // — Family —
+                {id:"toddler",       label:"🐣 Toddler OK"},
+              ];
+              return (
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+                  {filters.map(f=>(
+                    <button key={f.id} onClick={()=>setLibraryFilter(f.id)}
+                      style={{padding:"5px 12px",borderRadius:20,border:`1px solid ${libraryFilter===f.id?A.teal:A.border}`,
+                        background:libraryFilter===f.id?A.tealSoft:A.surface,
+                        color:libraryFilter===f.id?A.teal:A.textSecondary,
+                        fontSize:12,fontWeight:libraryFilter===f.id?700:400,cursor:"pointer",
+                        transition:"all 0.15s",whiteSpace:"nowrap"}}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Sort: custom recipes first, then alpha */}
+            {(()=>{
+              const sorted = [...allRecipes].sort((a,b)=>{
+                if (a.source!=="builtin" && b.source==="builtin") return -1;
+                if (a.source==="builtin" && b.source!=="builtin") return 1;
+                return a.name.localeCompare(b.name);
+              });
+              const filtered = sorted.filter(m=>{
+                if (libraryFilter==="all") return true;
+                // Protein filters
+                if (libraryFilter==="chicken") return /chicken/i.test(m.protein||m.name);
+                if (libraryFilter==="beef") return /beef|steak|brisket/i.test(m.protein||m.name);
+                if (libraryFilter==="turkey") return /turkey/i.test(m.protein||m.name);
+                if (libraryFilter==="salmon") return /salmon|fish|tuna|shrimp|seafood/i.test(m.protein||m.name);
+                if (libraryFilter==="pork") return /pork|bacon|ham|sausage/i.test(m.protein||m.name);
+                if (libraryFilter==="veggie") return /none|veggie|vegetarian|tofu|pasta|mac/i.test(m.protein||m.name);
+                // Method filters
+                if (["crockpot","sheetpan","instapot","onepan","stovetop","other"].includes(libraryFilter)) return m.method===libraryFilter;
+                // Cuisine filters (prefixed with "c:")
+                if (libraryFilter.startsWith("c:")) return (m.cuisine||"").toLowerCase() === libraryFilter.slice(2).toLowerCase();
+                if (libraryFilter==="toddler") return m.toddlerFriendly;
+                return true;
+              });
+              return (
+                <>
+                  <div style={{fontSize:11,color:A.textMuted,marginBottom:12,letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>
+                    {filtered.length} {libraryFilter==="all"?"Recipes":`${["chicken","beef","turkey","salmon","pork","veggie"].includes(libraryFilter)?libraryFilter.charAt(0).toUpperCase()+libraryFilter.slice(1):libraryFilter==="toddler"?"Toddler-Friendly":libraryFilter==="crockpot"?"Crockpot":libraryFilter==="sheetpan"?"Sheet Pan":"Instant Pot"} Recipes`}
+                  </div>
+                  {filtered.map(meal=>{
               const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
               const isAssignedToPickDay = pickForDay && plan[pickForDay]?.id === meal.id;
               return(
@@ -1993,6 +2125,7 @@ export default function MealPlanner() {
                       <div style={{fontWeight:600,fontSize:14,color:A.textPrimary,lineHeight:1.3,marginBottom:6}}>{meal.name}</div>
                       <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                         <Pill color={meta.color} bg={meta.bg}>{meta.emoji} {meta.label}</Pill>
+                        {meal.cuisine&&<Pill color="#6B7A8A" bg="#EEF0F3">{meal.cuisine}</Pill>}
                         {meal.toddlerFriendly&&<Pill color={A.amber} bg="#FFF8E6">🐣</Pill>}
                         {meal.source==="custom"&&<Pill color={A.teal} bg={A.tealSoft}>🔗</Pill>}
                         {meal.cookTime&&<Pill color={A.textMuted} bg={A.surface3}>⏱ {meal.cookTime}</Pill>}
@@ -2046,6 +2179,9 @@ export default function MealPlanner() {
                 </div>
               );
             })}
+                </>
+              );
+            })()}
           </>
         )}
 
