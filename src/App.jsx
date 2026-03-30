@@ -1342,8 +1342,16 @@ export default function MealPlanner() {
     }
   }, []);
 
-  const persist = (sw=savedWeeks, mr=myRecipes, rt=ratings, pl=plan, sk=skippedDays, ps=portionSizes) =>
-    store.set("data", { savedWeeks:sw, myRecipes:mr, ratings:rt, plan:pl, skippedDays:sk, portionSizes:ps });
+  // persist() is now just an explicit save — always pass all args
+  const persist = (sw, mr, rt, pl, sk, ps) =>
+    store.set("data", {
+      savedWeeks:  sw ?? savedWeeks,
+      myRecipes:   mr ?? myRecipes,
+      ratings:     rt ?? ratings,
+      plan:        pl ?? plan,
+      skippedDays: sk ?? skippedDays,
+      portionSizes: ps ?? portionSizes,
+    });
 
   const saveEditedRecipe = (updated) => {
     // Update in plan (any day using this recipe by id)
@@ -1367,11 +1375,22 @@ export default function MealPlanner() {
       Object.entries(plan).filter(([day]) => !skippedDays[day])
     );
     setGroceryCats(buildGroceriesWithPortions(activePlan, portionSizes));
-    // Persist plan state so it survives app reloads and deploys
-    if (Object.keys(plan).length > 0) {
-      persist(savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes);
-    }
   }, [plan, skippedDays, portionSizes]);
+
+  // Auto-persist ALL state to localStorage whenever anything changes
+  // Uses explicit values so no stale closure issues
+  useEffect(()=>{
+    if (Object.keys(plan).length > 0 || Object.keys(skippedDays).length > 0) {
+      store.set("data", {
+        savedWeeks,
+        myRecipes,
+        ratings,
+        plan,
+        skippedDays,
+        portionSizes,
+      });
+    }
+  }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(""), 2500); };
 
@@ -1743,7 +1762,11 @@ export default function MealPlanner() {
                           <span style={{fontSize:22,flexShrink:0}}>🥡</span>
                           <input
                             value={skippedDays[day]||""}
-                            onChange={e=>setSkippedDays(p=>({...p,[day]:e.target.value}))}
+                            onChange={e=>{
+                              const updated = {...skippedDays,[day]:e.target.value};
+                              setSkippedDays(updated);
+                              store.set("data",{savedWeeks,myRecipes,ratings,plan,skippedDays:updated,portionSizes});
+                            }}
                             placeholder="What are you ordering? (e.g. Hai Chinese)"
                             style={{flex:1,background:A.surface3,border:`1px solid ${A.border}`,borderRadius:10,
                               padding:"9px 12px",fontSize:13,color:A.textPrimary,outline:"none",fontFamily:"inherit"}}
