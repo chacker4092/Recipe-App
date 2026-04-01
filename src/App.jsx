@@ -547,11 +547,33 @@ Return ONLY this JSON (no explanation):
   return { ...meal, id: `photo_${Date.now()}`, source: "custom", recipeUrl: "", servings: Number(meal.servings) || 4 };
 }
 
-// ─── Persistent store (localStorage) ─────────────────────────────────────────
+// ─── Persistent store (localStorage + optional server sync) ──────────────────
+const SYNC_ENDPOINT = "/api/sync";
 const store = {
   get: (k) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
+
+// Push state to server (fire-and-forget, falls back silently)
+async function syncPush(data) {
+  try {
+    await fetch(SYNC_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  } catch(e) { /* offline or KV not set up — that's fine */ }
+}
+
+// Pull state from server, returns null if unavailable
+async function syncPull() {
+  try {
+    const res = await fetch(SYNC_ENDPOINT);
+    const json = await res.json();
+    if (json.fallback || !json.data) return null;
+    return json.data;
+  } catch(e) { return null; }
+}
 
 // ─── UI Primitives ────────────────────────────────────────────────────────────
 function Pill({ children, color, bg, size=11 }) {
@@ -1323,23 +1345,40 @@ export default function MealPlanner() {
   const [planModal, setPlanModal]     = useState(false);  // new week modal
   const [pickForDay, setPickForDay]   = useState(null);   // day we're picking a recipe for
   const [libraryFilter, setLibraryFilter] = useState("all"); // filter for recipe library
+  const [syncStatus, setSyncStatus]   = useState("idle"); // idle | syncing | synced | error
 
   const allRecipes = [...SEED_MEALS.filter(m=>!deletedSeeds.includes(m.id)), ...myRecipes];
 
   useEffect(()=>{
-    const d = store.get("data") || {};
-    if (d.savedWeeks)   setSavedWeeks(d.savedWeeks);
-    if (d.myRecipes)    setMyRecipes(d.myRecipes);
-    if (d.ratings)      setRatings(d.ratings);
-    if (d.skippedDays)  setSkippedDays(d.skippedDays);
-    if (d.portionSizes) setPortionSizes(d.portionSizes);
-    if (d.plan && Object.keys(d.plan).length > 0) {
-      // Restore last week's plan — don't overwrite with defaults
-      setPlan(d.plan);
-    } else {
-      // First ever load — seed with default meals
-      generateWeek(false);
-    }
+    const applyData = (d) => {
+      if (!d) return false;
+      if (d.savedWeeks)   setSavedWeeks(d.savedWeeks);
+      if (d.myRecipes)    setMyRecipes(d.myRecipes);
+      if (d.ratings)      setRatings(d.ratings);
+      // Always restore skippedDays even if empty object
+      if (d.skippedDays !== undefined) setSkippedDays(d.skippedDays);
+      if (d.portionSizes) setPortionSizes(d.portionSizes);
+      if (d.plan && Object.keys(d.plan).length > 0) {
+        setPlan(d.plan);
+        return true; // had a plan
+      }
+      return false;
+    };
+
+    // Try server sync first (newest data wins across devices)
+    syncPull().then(serverData => {
+      if (serverData) {
+        const hadPlan = applyData(serverData);
+        // Also save to local so it works offline
+        store.set("data", serverData);
+        if (!hadPlan) generateWeek(false);
+      } else {
+        // Fall back to localStorage
+        const local = store.get("data") || {};
+        const hadPlan = applyData(local);
+        if (!hadPlan) generateWeek(false);
+      }
+    });
   }, []);
 
   // persist() is now just an explicit save — always pass all args
@@ -1369,6 +1408,14 @@ export default function MealPlanner() {
     showToast("Recipe updated!");
   };
 
+  // Keep refs always up-to-date (bypasses stale closure issue)
+  planRef.current        = plan;
+  skippedRef.current     = skippedDays;
+  portionsRef.current    = portionSizes;
+  savedWeeksRef.current  = savedWeeks;
+  myRecipesRef.current   = myRecipes;
+  ratingsRef.current     = ratings;
+
   // Rebuild grocery list whenever plan, skipped days, or portion sizes change
   useEffect(()=>{
     const activePlan = Object.fromEntries(
@@ -1377,18 +1424,22 @@ export default function MealPlanner() {
     setGroceryCats(buildGroceriesWithPortions(activePlan, portionSizes));
   }, [plan, skippedDays, portionSizes]);
 
-  // Auto-persist ALL state to localStorage whenever anything changes
-  // Uses explicit values so no stale closure issues
+  // Auto-persist using refs so we always get the latest values
   useEffect(()=>{
-    if (Object.keys(plan).length > 0 || Object.keys(skippedDays).length > 0) {
-      store.set("data", {
-        savedWeeks,
-        myRecipes,
-        ratings,
-        plan,
-        skippedDays,
-        portionSizes,
-      });
+    const snapshot = {
+      savedWeeks:  savedWeeksRef.current,
+      myRecipes:   myRecipesRef.current,
+      ratings:     ratingsRef.current,
+      plan:        planRef.current,
+      skippedDays: skippedRef.current,
+      portionSizes: portionsRef.current,
+    };
+    store.set("data", snapshot);
+    if (Object.keys(planRef.current).length > 0) {
+      setSyncStatus("syncing");
+      syncPush(snapshot)
+        .then(() => { setSyncStatus("synced"); setTimeout(()=>setSyncStatus("idle"), 3000); })
+        .catch(() => setSyncStatus("error"));
     }
   }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
 
@@ -1659,7 +1710,12 @@ export default function MealPlanner() {
 
       {/* ── HEADER ── */}
       <div style={{padding:"52px 20px 20px",background:"linear-gradient(180deg,#E8EDF2 0%,#F2F4F6 100%)"}}>
-        <div style={{fontSize:11,color:A.teal,letterSpacing:3,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Family Meal Planner</div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+          <div style={{fontSize:11,color:A.teal,letterSpacing:3,textTransform:"uppercase",fontWeight:700}}>Family Meal Planner</div>
+          {syncStatus==="syncing"&&<div style={{width:7,height:7,borderRadius:"50%",background:A.amber}} title="Syncing..."/>}
+          {syncStatus==="synced"&&<div style={{width:7,height:7,borderRadius:"50%",background:A.verde}} title="Synced ✓"/>}
+          {syncStatus==="error"&&<div style={{width:7,height:7,borderRadius:"50%",background:"transparent"}} title="Offline — saved locally"/>}
+        </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
           <div>
             <div style={{fontSize:28,fontWeight:300,color:A.textSecondary,lineHeight:1.1}}>This Week's</div>
@@ -1763,9 +1819,10 @@ export default function MealPlanner() {
                           <input
                             value={skippedDays[day]||""}
                             onChange={e=>{
-                              const updated = {...skippedDays,[day]:e.target.value};
+                              const updated = {...skippedRef.current,[day]:e.target.value};
+                              skippedRef.current = updated;
                               setSkippedDays(updated);
-                              store.set("data",{savedWeeks,myRecipes,ratings,plan,skippedDays:updated,portionSizes});
+                              store.set("data",{savedWeeks:savedWeeksRef.current,myRecipes:myRecipesRef.current,ratings:ratingsRef.current,plan:planRef.current,skippedDays:updated,portionSizes:portionsRef.current});
                             }}
                             placeholder="What are you ordering? (e.g. Hai Chinese)"
                             style={{flex:1,background:A.surface3,border:`1px solid ${A.border}`,borderRadius:10,
