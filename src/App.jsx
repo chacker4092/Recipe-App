@@ -1347,6 +1347,14 @@ export default function MealPlanner() {
   const [libraryFilter, setLibraryFilter] = useState("all"); // filter for recipe library
   const [syncStatus, setSyncStatus]   = useState("idle"); // idle | syncing | synced | error
 
+  // Refs — always hold latest values, no stale closure issues
+  const planRef        = useRef({});
+  const skippedRef     = useRef({});
+  const portionsRef    = useRef({});
+  const savedWeeksRef  = useRef({});
+  const myRecipesRef   = useRef([]);
+  const ratingsRef     = useRef({});
+
   const allRecipes = [...SEED_MEALS.filter(m=>!deletedSeeds.includes(m.id)), ...myRecipes];
 
   useEffect(()=>{
