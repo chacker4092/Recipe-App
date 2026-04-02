@@ -674,10 +674,21 @@ function SizePicker({ value, onChange }) {
 }
 
 // ─── Recipe Sheet ─────────────────────────────────────────────────────────────
-function RecipeSheet({ meal, onClose, onEdit, plan, onAssign, pickForDay, onPickAssign }) {
-  const [size, setSize] = useState(1);
+function RecipeSheet({ meal, onClose, onEdit, plan, onAssign, pickForDay, onPickAssign, portionSizes, onPortionChange }) {
+  // Find which day this meal is assigned to, then read its current portion
+  const assignedDay = plan ? Object.keys(plan).find(d => plan[d]?.id === meal.id) : null;
+  const initialSize = (portionSizes && assignedDay) ? (portionSizes[assignedDay] || 1) : 1;
+  const [size, setSize] = useState(initialSize);
   const [assigned, setAssigned] = useState(null);
   if (!meal) return null;
+
+  const handleSizeChange = (val) => {
+    setSize(val);
+    // Sync back to the meal card if this meal is in the plan
+    if (onPortionChange && assignedDay) {
+      onPortionChange(assignedDay, val);
+    }
+  };
   const meta = METHOD_META[meal.method] || METHOD_META.sheetpan;
   const baseServings = Number(meal.servings) || 4;
   const scaledServings = Math.round(baseServings * size);
@@ -749,7 +760,7 @@ function RecipeSheet({ meal, onClose, onEdit, plan, onAssign, pickForDay, onPick
               {size!==1&&<span style={{fontSize:11,color:A.textMuted,marginLeft:6}}>(base: {baseServings})</span>}
             </div>
           </div>
-          <SizePicker value={size} onChange={setSize}/>
+          <SizePicker value={size} onChange={handleSizeChange}/>
         </div>
 
         {meal.recipeUrl&&(
@@ -1614,7 +1625,9 @@ export default function MealPlanner() {
       {viewRecipe&&<RecipeSheet meal={viewRecipe} onClose={()=>setViewRecipe(null)} onEdit={m=>{setEditRecipe(m);}}
         plan={plan} onAssign={(day,meal)=>{swapManual(day,meal);}}
         pickForDay={pickForDay}
-        onPickAssign={(day,meal)=>{ swapManual(day,meal); setPickForDay(null); }}/>}
+        onPickAssign={(day,meal)=>{ swapManual(day,meal); setPickForDay(null); }}
+        portionSizes={portionSizes}
+        onPortionChange={(day, val) => setPortionSizes(p => ({...p, [day]: val}))}/>}
       {editRecipe&&<EditRecipeModal meal={editRecipe} onSave={saveEditedRecipe} onClose={()=>setEditRecipe(null)}/>}
       {addModal&&<AddRecipeModal onAdd={addRecipe} onClose={()=>setAddModal(false)}/>}
       {rateModal&&<RateModal meal={rateModal} existing={ratings[rateModal.name]} onSave={saveRating} onClose={()=>setRateModal(null)}/>}
