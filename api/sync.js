@@ -1,57 +1,47 @@
-// /api/sync.js — Shared state sync using Vercel KV (Upstash Redis)
-// Setup: In Vercel dashboard → Storage → Create KV database → link to project
-// This adds KV_REST_API_URL and KV_REST_API_TOKEN env vars automatically
-
-const KV_KEY = "mealhacked:family-data";
-
-async function kvGet() {
-  const url = `${process.env.KV_REST_API_URL}/get/${KV_KEY}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}` },
-  });
-  const json = await res.json();
-  return json.result ? JSON.parse(json.result) : null;
+import { Redis } from "@upstash/redis";
+ 
+const KEY = "mealhacked:family-data";
+ 
+// Redis.fromEnv() automatically reads UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN
+// which Vercel sets when you connect an Upstash database
+let redis;
+try {
+  redis = Redis.fromEnv();
+} catch(e) {
+  redis = null;
 }
-
-async function kvSet(data) {
-  const url = `${process.env.KV_REST_API_URL}/set/${KV_KEY}`;
-  await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(JSON.stringify(data)), // KV stores strings
-  });
-}
-
+ 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
+ 
   if (req.method === "OPTIONS") return res.status(200).end();
-
-  // KV not configured — tell client to use localStorage only
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
-    return res.status(200).json({ fallback: true, reason: "KV not configured" });
+ 
+  // Redis not configured — fall back to localStorage
+  if (!redis) {
+    return res.status(200).json({ fallback: true, reason: "Redis not configured" });
   }
-
+ 
   try {
     if (req.method === "GET") {
-      const data = await kvGet();
+      const data = await redis.get(KEY);
       if (!data) return res.status(200).json({ fallback: true, reason: "No data yet" });
-      return res.status(200).json({ data });
+      // Upstash auto-parses JSON, so data may already be an object
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      return res.status(200).json({ data: parsed });
     }
-
+ 
     if (req.method === "POST") {
-      await kvSet(req.body);
+      // Store with 30-day expiry (so stale data auto-clears)
+      await redis.set(KEY, JSON.stringify(req.body), { ex: 60 * 60 * 24 * 30 });
       return res.status(200).json({ ok: true });
     }
   } catch (err) {
-    // Don't crash the app — just fall back to localStorage
+    // Never crash the app — silently fall back to localStorage
+    console.error("Sync error:", err.message);
     return res.status(200).json({ fallback: true, reason: err.message });
   }
-
+ 
   return res.status(405).json({ error: "Method not allowed" });
 }
