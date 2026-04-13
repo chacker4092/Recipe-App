@@ -547,31 +547,100 @@ Return ONLY this JSON (no explanation):
   return { ...meal, id: `photo_${Date.now()}`, source: "custom", recipeUrl: "", servings: Number(meal.servings) || 4 };
 }
 
-// ─── Persistent store (localStorage + optional server sync) ──────────────────
+// ─── Persistent store ────────────────────────────────────────────────────────
 const SYNC_ENDPOINT = "/api/sync";
-const store = {
-  get: (k) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } },
-  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-};
 
-// Push state to server (fire-and-forget, falls back silently)
+// Photos are stored separately to avoid blowing up the main data key
+const PHOTO_KEY = "mealhacked:photos"; // { recipeId: dataUrl }
+
+function lsGet(key) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+
+function lsSet(key, val) {
+  try {
+    localStorage.setItem(key, JSON.stringify(val));
+    return true;
+  } catch(e) {
+    // Quota exceeded — try clearing old photo cache first then retry
+    try { localStorage.removeItem(PHOTO_KEY); } catch {}
+    try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch {}
+    return false;
+  }
+}
+
+const store = { get: lsGet, set: lsSet };
+
+// Strip base64 photos from data before saving (stored separately)
+function stripPhotos(data) {
+  if (!data) return data;
+  const photos = {};
+  const strip = (recipe) => {
+    if (!recipe) return recipe;
+    if (recipe.photoDataUrl) {
+      photos[recipe.id] = recipe.photoDataUrl;
+      return { ...recipe, photoDataUrl: null };
+    }
+    return recipe;
+  };
+  const cleanRecipes = (data.myRecipes || []).map(strip);
+  const cleanPlan = {};
+  Object.entries(data.plan || {}).forEach(([day, m]) => { cleanPlan[day] = strip(m); });
+  return { stripped: { ...data, myRecipes: cleanRecipes, plan: cleanPlan }, photos };
+}
+
+// Reattach photos to recipes after loading
+function reattachPhotos(data, photos) {
+  if (!data || !photos || !Object.keys(photos).length) return data;
+  const attach = (recipe) => {
+    if (!recipe) return recipe;
+    return photos[recipe.id] ? { ...recipe, photoDataUrl: photos[recipe.id] } : recipe;
+  };
+  return {
+    ...data,
+    myRecipes: (data.myRecipes || []).map(attach),
+    plan: Object.fromEntries(Object.entries(data.plan || {}).map(([d,m]) => [d, attach(m)])),
+  };
+}
+
+// Save everything — photos separately to avoid quota issues
+function saveAll(data) {
+  const { stripped, photos } = stripPhotos(data);
+  lsSet("data", stripped);
+  if (Object.keys(photos).length) {
+    const existing = lsGet(PHOTO_KEY) || {};
+    lsSet(PHOTO_KEY, { ...existing, ...photos });
+  }
+}
+
+// Load everything and reattach photos
+function loadAll() {
+  const data = lsGet("data");
+  const photos = lsGet(PHOTO_KEY) || {};
+  return reattachPhotos(data, photos);
+}
+
+// Push to server (fire-and-forget)
 async function syncPush(data) {
   try {
+    const { stripped } = stripPhotos(data); // don't send photos to server
     await fetch(SYNC_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify(stripped),
     });
-  } catch(e) { /* offline or KV not set up — that's fine */ }
+  } catch(e) {}
 }
 
-// Pull state from server, returns null if unavailable
+// Pull from server
 async function syncPull() {
   try {
     const res = await fetch(SYNC_ENDPOINT);
     const json = await res.json();
     if (json.fallback || !json.data) return null;
-    return json.data;
+    // Reattach local photos (server doesn't store them)
+    const photos = lsGet(PHOTO_KEY) || {};
+    return reattachPhotos(json.data, photos);
   } catch(e) { return null; }
 }
 
@@ -1388,28 +1457,30 @@ export default function MealPlanner() {
     syncPull().then(serverData => {
       if (serverData) {
         const hadPlan = applyData(serverData);
-        // Also save to local so it works offline
-        store.set("data", serverData);
+        // Save to local so it works offline next time
+        saveAll(serverData);
         if (!hadPlan) generateWeek(false);
       } else {
-        // Fall back to localStorage
-        const local = store.get("data") || {};
+        // Fall back to localStorage (with photos reattached)
+        const local = loadAll() || {};
         const hadPlan = applyData(local);
         if (!hadPlan) generateWeek(false);
       }
     });
   }, []);
 
-  // persist() is now just an explicit save — always pass all args
-  const persist = (sw, mr, rt, pl, sk, ps) =>
-    store.set("data", {
-      savedWeeks:  sw ?? savedWeeks,
-      myRecipes:   mr ?? myRecipes,
-      ratings:     rt ?? ratings,
-      plan:        pl ?? plan,
-      skippedDays: sk ?? skippedDays,
-      portionSizes: ps ?? portionSizes,
-    });
+  // persist() — explicit save with current or provided values
+  const persist = (sw, mr, rt, pl, sk, ps) => {
+    const snap = {
+      savedWeeks:   sw  !== undefined ? sw  : savedWeeks,
+      myRecipes:    mr  !== undefined ? mr  : myRecipes,
+      ratings:      rt  !== undefined ? rt  : ratings,
+      plan:         pl  !== undefined ? pl  : plan,
+      skippedDays:  sk  !== undefined ? sk  : skippedDays,
+      portionSizes: ps  !== undefined ? ps  : portionSizes,
+    };
+    saveAll(snap);
+  };
 
   const saveEditedRecipe = (updated) => {
     // Update in plan (any day using this recipe by id)
@@ -1443,23 +1514,16 @@ export default function MealPlanner() {
     setGroceryCats(buildGroceriesWithPortions(activePlan, portionSizes));
   }, [plan, skippedDays, portionSizes]);
 
-  // Auto-persist using refs so we always get the latest values
+  // Auto-persist on every state change — uses current state values directly
   useEffect(()=>{
-    const snapshot = {
-      savedWeeks:  savedWeeksRef.current,
-      myRecipes:   myRecipesRef.current,
-      ratings:     ratingsRef.current,
-      plan:        planRef.current,
-      skippedDays: skippedRef.current,
-      portionSizes: portionsRef.current,
-    };
-    store.set("data", snapshot);
-    if (Object.keys(planRef.current).length > 0) {
-      setSyncStatus("syncing");
-      syncPush(snapshot)
-        .then(() => { setSyncStatus("synced"); setTimeout(()=>setSyncStatus("idle"), 3000); })
-        .catch(() => setSyncStatus("error"));
-    }
+    // Only persist if we have something meaningful
+    if (Object.keys(plan).length === 0 && myRecipes.length === 0) return;
+    const snapshot = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes };
+    saveAll(snapshot);
+    setSyncStatus("syncing");
+    syncPush(snapshot)
+      .then(() => { setSyncStatus("synced"); setTimeout(()=>setSyncStatus("idle"), 3000); })
+      .catch(() => setSyncStatus("error"));
   }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(""), 2500); };
@@ -1840,10 +1904,9 @@ export default function MealPlanner() {
                           <input
                             value={skippedDays[day]||""}
                             onChange={e=>{
-                              const updated = {...skippedRef.current,[day]:e.target.value};
-                              skippedRef.current = updated;
+                              const updated = {...skippedDays,[day]:e.target.value};
                               setSkippedDays(updated);
-                              store.set("data",{savedWeeks:savedWeeksRef.current,myRecipes:myRecipesRef.current,ratings:ratingsRef.current,plan:planRef.current,skippedDays:updated,portionSizes:portionsRef.current});
+                              saveAll({savedWeeks,myRecipes,ratings,plan,skippedDays:updated,portionSizes});
                             }}
                             placeholder="What are you ordering? (e.g. Hai Chinese)"
                             style={{flex:1,background:A.surface3,border:`1px solid ${A.border}`,borderRadius:10,
