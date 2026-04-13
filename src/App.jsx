@@ -562,10 +562,21 @@ function lsSet(key, val) {
     localStorage.setItem(key, JSON.stringify(val));
     return true;
   } catch(e) {
-    // Quota exceeded — try clearing old photo cache first then retry
+    console.warn("localStorage quota hit, clearing photos and retrying:", e.message);
+    // Clear photo cache first to free space
     try { localStorage.removeItem(PHOTO_KEY); } catch {}
-    try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch {}
-    return false;
+    // Strip photos from val too before retrying
+    try {
+      const stripped = typeof val === "object" && val !== null
+        ? { ...val, myRecipes: (val.myRecipes||[]).map(r => ({...r, photoDataUrl: null})),
+            plan: Object.fromEntries(Object.entries(val.plan||{}).map(([d,m]) => [d, m ? {...m, photoDataUrl:null} : m])) }
+        : val;
+      localStorage.setItem(key, JSON.stringify(stripped));
+      return true;
+    } catch(e2) {
+      console.error("localStorage completely full, cannot save:", e2.message);
+      return false;
+    }
   }
 }
 
@@ -1437,35 +1448,41 @@ export default function MealPlanner() {
 
   const allRecipes = [...SEED_MEALS.filter(m=>!deletedSeeds.includes(m.id)), ...myRecipes];
 
+  // Track whether initial load is done to prevent generateWeek from racing
+  const hasLoadedRef = useRef(false);
+
   useEffect(()=>{
     const applyData = (d) => {
       if (!d) return false;
-      if (d.savedWeeks)   setSavedWeeks(d.savedWeeks);
-      if (d.myRecipes)    setMyRecipes(d.myRecipes);
-      if (d.ratings)      setRatings(d.ratings);
-      // Always restore skippedDays even if empty object
+      if (d.savedWeeks)               setSavedWeeks(d.savedWeeks);
+      if (d.myRecipes?.length)        setMyRecipes(d.myRecipes);
+      if (d.ratings)                  setRatings(d.ratings);
       if (d.skippedDays !== undefined) setSkippedDays(d.skippedDays);
-      if (d.portionSizes) setPortionSizes(d.portionSizes);
+      if (d.portionSizes)             setPortionSizes(d.portionSizes);
       if (d.plan && Object.keys(d.plan).length > 0) {
         setPlan(d.plan);
-        return true; // had a plan
+        return true;
       }
       return false;
     };
 
-    // Try server sync first (newest data wins across devices)
+    // 1. Load from localStorage immediately (synchronous — no flash)
+    const local = loadAll() || {};
+    const hadLocalPlan = applyData(local);
+
+    // 2. Then try server for fresher data (async — may update UI again)
     syncPull().then(serverData => {
       if (serverData) {
-        const hadPlan = applyData(serverData);
-        // Save to local so it works offline next time
-        saveAll(serverData);
-        if (!hadPlan) generateWeek(false);
-      } else {
-        // Fall back to localStorage (with photos reattached)
-        const local = loadAll() || {};
-        const hadPlan = applyData(local);
-        if (!hadPlan) generateWeek(false);
+        applyData(serverData);
+        saveAll(serverData); // cache locally
+      } else if (!hadLocalPlan) {
+        // Truly first launch — seed with defaults
+        generateWeek(false);
       }
+      hasLoadedRef.current = true;
+    }).catch(() => {
+      if (!hadLocalPlan) generateWeek(false);
+      hasLoadedRef.current = true;
     });
   }, []);
 
@@ -1514,12 +1531,13 @@ export default function MealPlanner() {
     setGroceryCats(buildGroceriesWithPortions(activePlan, portionSizes));
   }, [plan, skippedDays, portionSizes]);
 
-  // Auto-persist on every state change — uses current state values directly
+  // Auto-persist on every state change
   useEffect(()=>{
-    // Only persist if we have something meaningful
-    if (Object.keys(plan).length === 0 && myRecipes.length === 0) return;
+    // Don't save during the very first render before load completes
+    if (!hasLoadedRef.current && Object.keys(plan).length === 0 && myRecipes.length === 0) return;
     const snapshot = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes };
     saveAll(snapshot);
+    // Sync to server in background
     setSyncStatus("syncing");
     syncPush(snapshot)
       .then(() => { setSyncStatus("synced"); setTimeout(()=>setSyncStatus("idle"), 3000); })
