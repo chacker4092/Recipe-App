@@ -549,109 +549,149 @@ Return ONLY this JSON (no explanation):
 
 // ─── Persistent store ────────────────────────────────────────────────────────
 const SYNC_ENDPOINT = "/api/sync";
+const LS_KEY   = "mealhacked:v2";      // main data key
+const PHOTO_KEY = "mealhacked:photos"; // { recipeId: dataUrl } — stored separately
 
-// Photos are stored separately to avoid blowing up the main data key
-const PHOTO_KEY = "mealhacked:photos"; // { recipeId: dataUrl }
-
+// ── localStorage helpers ──
 function lsGet(key) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+  catch { return null; }
 }
 
 function lsSet(key, val) {
   try {
     localStorage.setItem(key, JSON.stringify(val));
-    return true;
   } catch(e) {
-    console.warn("localStorage quota hit, clearing photos and retrying:", e.message);
-    // Clear photo cache first to free space
-    try { localStorage.removeItem(PHOTO_KEY); } catch {}
-    // Strip photos from val too before retrying
+    // Quota hit — strip photos from data and retry
     try {
-      const stripped = typeof val === "object" && val !== null
-        ? { ...val, myRecipes: (val.myRecipes||[]).map(r => ({...r, photoDataUrl: null})),
-            plan: Object.fromEntries(Object.entries(val.plan||{}).map(([d,m]) => [d, m ? {...m, photoDataUrl:null} : m])) }
-        : val;
-      localStorage.setItem(key, JSON.stringify(stripped));
-      return true;
-    } catch(e2) {
-      console.error("localStorage completely full, cannot save:", e2.message);
-      return false;
-    }
+      localStorage.removeItem(PHOTO_KEY);
+      const safe = stripPhotosDeep(val);
+      localStorage.setItem(key, JSON.stringify(safe));
+    } catch(e2) { console.error("localStorage full:", e2); }
   }
 }
 
-const store = { get: lsGet, set: lsSet };
-
-// Strip base64 photos from data before saving (stored separately)
-function stripPhotos(data) {
-  if (!data) return data;
-  const photos = {};
-  const strip = (recipe) => {
-    if (!recipe) return recipe;
-    if (recipe.photoDataUrl) {
-      photos[recipe.id] = recipe.photoDataUrl;
-      return { ...recipe, photoDataUrl: null };
-    }
-    return recipe;
-  };
-  const cleanRecipes = (data.myRecipes || []).map(strip);
-  const cleanPlan = {};
-  Object.entries(data.plan || {}).forEach(([day, m]) => { cleanPlan[day] = strip(m); });
-  return { stripped: { ...data, myRecipes: cleanRecipes, plan: cleanPlan }, photos };
+function stripPhotosDeep(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(stripPhotosDeep);
+  const out = {};
+  for (const k of Object.keys(obj)) {
+    out[k] = k === "photoDataUrl" ? null : stripPhotosDeep(obj[k]);
+  }
+  return out;
 }
 
-// Reattach photos to recipes after loading
-function reattachPhotos(data, photos) {
-  if (!data || !photos || !Object.keys(photos).length) return data;
-  const attach = (recipe) => {
-    if (!recipe) return recipe;
-    return photos[recipe.id] ? { ...recipe, photoDataUrl: photos[recipe.id] } : recipe;
-  };
+// ── Photo management ──
+// Photos stored separately by recipeId so they survive merges
+function savePhoto(recipeId, dataUrl) {
+  if (!recipeId || !dataUrl) return;
+  const existing = lsGet(PHOTO_KEY) || {};
+  lsSet(PHOTO_KEY, { ...existing, [recipeId]: dataUrl });
+}
+
+function loadPhotos() {
+  return lsGet(PHOTO_KEY) || {};
+}
+
+function attachPhotos(data) {
+  if (!data) return data;
+  const photos = loadPhotos();
+  if (!Object.keys(photos).length) return data;
+  const attach = (r) => r && photos[r.id] && !r.photoDataUrl
+    ? { ...r, photoDataUrl: photos[r.id] } : r;
   return {
     ...data,
     myRecipes: (data.myRecipes || []).map(attach),
-    plan: Object.fromEntries(Object.entries(data.plan || {}).map(([d,m]) => [d, attach(m)])),
+    plan: Object.fromEntries(
+      Object.entries(data.plan || {}).map(([d, m]) => [d, attach(m)])
+    ),
   };
 }
 
-// Save everything — photos separately to avoid quota issues
+// ── Merge logic — combines data from two devices ──
+// Recipes: union by id (both devices keep all recipes)
+// Plan: most recent non-null day wins
+// Ratings: merge, higher star wins
+function mergeData(local, remote) {
+  if (!local && !remote) return {};
+  if (!local) return remote;
+  if (!remote) return local;
+
+  // Merge recipes: union by id
+  const recipeMap = {};
+  [...(remote.myRecipes || []), ...(local.myRecipes || [])].forEach(r => {
+    if (r && r.id) recipeMap[r.id] = r; // local wins on conflict (has photos)
+  });
+
+  // Merge plan: for each day, keep whichever has a meal (non-null)
+  // If both have a meal, local wins (most recently touched device)
+  const plan = {};
+  const allDays = new Set([
+    ...Object.keys(local.plan || {}),
+    ...Object.keys(remote.plan || {}),
+  ]);
+  allDays.forEach(day => {
+    const l = (local.plan || {})[day];
+    const r = (remote.plan || {})[day];
+    plan[day] = l !== undefined ? l : r; // local wins
+  });
+
+  // Merge skippedDays: local wins
+  const skippedDays = { ...(remote.skippedDays || {}), ...(local.skippedDays || {}) };
+
+  // Merge ratings: higher star wins
+  const ratings = { ...(remote.ratings || {}) };
+  Object.entries(local.ratings || {}).forEach(([name, r]) => {
+    if (!ratings[name] || r.stars >= ratings[name].stars) ratings[name] = r;
+  });
+
+  // Merge saved weeks: union
+  const savedWeeks = { ...(remote.savedWeeks || {}), ...(local.savedWeeks || {}) };
+
+  return {
+    myRecipes: Object.values(recipeMap),
+    plan,
+    skippedDays,
+    ratings,
+    savedWeeks,
+    portionSizes: { ...(remote.portionSizes || {}), ...(local.portionSizes || {}) },
+    updatedAt: Date.now(),
+  };
+}
+
+// ── Save / Load ──
 function saveAll(data) {
-  const { stripped, photos } = stripPhotos(data);
-  lsSet("data", stripped);
-  if (Object.keys(photos).length) {
-    const existing = lsGet(PHOTO_KEY) || {};
-    lsSet(PHOTO_KEY, { ...existing, ...photos });
-  }
+  // Save photos separately before stripping
+  [...(data.myRecipes || []), ...Object.values(data.plan || {})].forEach(r => {
+    if (r?.id && r?.photoDataUrl) savePhoto(r.id, r.photoDataUrl);
+  });
+  // Strip photos from main data to keep it small
+  lsSet(LS_KEY, stripPhotosDeep(data));
 }
 
-// Load everything and reattach photos
 function loadAll() {
-  const data = lsGet("data");
-  const photos = lsGet(PHOTO_KEY) || {};
-  return reattachPhotos(data, photos);
+  const data = lsGet(LS_KEY) || lsGet("data") || {}; // fallback to old key
+  return attachPhotos(data);
 }
 
-// Push to server (fire-and-forget)
+// ── Server sync ──
 async function syncPush(data) {
   try {
-    const { stripped } = stripPhotos(data); // don't send photos to server
+    // Never push photos — too large for Upstash
     await fetch(SYNC_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(stripped),
+      body: JSON.stringify({ ...stripPhotosDeep(data), updatedAt: Date.now() }),
     });
   } catch(e) {}
 }
 
-// Pull from server
 async function syncPull() {
   try {
     const res = await fetch(SYNC_ENDPOINT);
     const json = await res.json();
     if (json.fallback || !json.data) return null;
-    // Reattach local photos (server doesn't store them)
-    const photos = lsGet(PHOTO_KEY) || {};
-    return reattachPhotos(json.data, photos);
+    return json.data;
   } catch(e) { return null; }
 }
 
@@ -1448,35 +1488,45 @@ export default function MealPlanner() {
 
   const allRecipes = [...SEED_MEALS.filter(m=>!deletedSeeds.includes(m.id)), ...myRecipes];
 
-  // Track whether initial load is done to prevent generateWeek from racing
+  // Track whether initial load is done
   const hasLoadedRef = useRef(false);
 
   useEffect(()=>{
     const applyData = (d) => {
       if (!d) return false;
-      if (d.savedWeeks)               setSavedWeeks(d.savedWeeks);
-      if (d.myRecipes?.length)        setMyRecipes(d.myRecipes);
-      if (d.ratings)                  setRatings(d.ratings);
-      if (d.skippedDays !== undefined) setSkippedDays(d.skippedDays);
-      if (d.portionSizes)             setPortionSizes(d.portionSizes);
-      if (d.plan && Object.keys(d.plan).length > 0) {
-        setPlan(d.plan);
+      // Reattach photos from local storage (server never stores them)
+      const withPhotos = attachPhotos(d);
+      if (withPhotos.savedWeeks && Object.keys(withPhotos.savedWeeks).length)
+        setSavedWeeks(withPhotos.savedWeeks);
+      if (withPhotos.myRecipes?.length)
+        setMyRecipes(withPhotos.myRecipes);
+      if (withPhotos.ratings && Object.keys(withPhotos.ratings).length)
+        setRatings(withPhotos.ratings);
+      if (withPhotos.skippedDays !== undefined)
+        setSkippedDays(withPhotos.skippedDays);
+      if (withPhotos.portionSizes && Object.keys(withPhotos.portionSizes).length)
+        setPortionSizes(withPhotos.portionSizes);
+      if (withPhotos.plan && Object.keys(withPhotos.plan).length > 0) {
+        setPlan(withPhotos.plan);
         return true;
       }
       return false;
     };
 
-    // 1. Load from localStorage immediately (synchronous — no flash)
+    // 1. Load local data immediately (synchronous, no flash)
     const local = loadAll() || {};
     const hadLocalPlan = applyData(local);
 
-    // 2. Then try server for fresher data (async — may update UI again)
-    syncPull().then(serverData => {
-      if (serverData) {
-        applyData(serverData);
-        saveAll(serverData); // cache locally
+    // 2. Fetch from server and MERGE with local (both devices contribute)
+    syncPull().then(remote => {
+      if (remote) {
+        // Merge: union of recipes + local plan wins day-by-day
+        const merged = mergeData(local, remote);
+        applyData(merged);
+        saveAll(merged);       // save merged result locally
+        syncPush(merged);      // push merged result back to server
       } else if (!hadLocalPlan) {
-        // Truly first launch — seed with defaults
+        // No data anywhere — true first launch
         generateWeek(false);
       }
       hasLoadedRef.current = true;
@@ -1533,13 +1583,12 @@ export default function MealPlanner() {
 
   // Auto-persist on every state change
   useEffect(()=>{
-    // Don't save during the very first render before load completes
+    // Skip the very first empty render (before load runs)
     if (!hasLoadedRef.current && Object.keys(plan).length === 0 && myRecipes.length === 0) return;
-    const snapshot = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes };
-    saveAll(snapshot);
-    // Sync to server in background
+    const snapshot = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes, updatedAt: Date.now() };
+    saveAll(snapshot);     // saves to localStorage (with photos separately)
     setSyncStatus("syncing");
-    syncPush(snapshot)
+    syncPush(snapshot)     // pushes to Upstash (no photos)
       .then(() => { setSyncStatus("synced"); setTimeout(()=>setSyncStatus("idle"), 3000); })
       .catch(() => setSyncStatus("error"));
   }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
