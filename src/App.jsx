@@ -1583,14 +1583,42 @@ export default function MealPlanner() {
 
   // Auto-persist on every state change
   useEffect(()=>{
-    // Skip the very first empty render (before load runs)
     if (!hasLoadedRef.current && Object.keys(plan).length === 0 && myRecipes.length === 0) return;
     const snapshot = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes, updatedAt: Date.now() };
-    saveAll(snapshot);     // saves to localStorage (with photos separately)
+    saveAll(snapshot);
     setSyncStatus("syncing");
-    syncPush(snapshot)     // pushes to Upstash (no photos)
+    syncPush(snapshot)
       .then(() => { setSyncStatus("synced"); setTimeout(()=>setSyncStatus("idle"), 3000); })
       .catch(() => setSyncStatus("error"));
+  }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
+
+  // Poll server every 30s so both phones stay in sync while app is open
+  useEffect(()=>{
+    const poll = setInterval(async () => {
+      if (!hasLoadedRef.current) return;
+      try {
+        const remote = await syncPull();
+        if (!remote) return;
+        const local = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes };
+        const localTs  = local.updatedAt  || 0;
+        const remoteTs = remote.updatedAt || 0;
+        // Only update if server has newer data than what we last saved
+        if (remoteTs > localTs) {
+          const merged = mergeData(local, remote);
+          const withPhotos = attachPhotos(merged);
+          if (withPhotos.myRecipes?.length)       setMyRecipes(withPhotos.myRecipes);
+          if (withPhotos.plan)                    setPlan(withPhotos.plan);
+          if (withPhotos.skippedDays)             setSkippedDays(withPhotos.skippedDays);
+          if (withPhotos.portionSizes)            setPortionSizes(withPhotos.portionSizes);
+          if (withPhotos.ratings)                 setRatings(withPhotos.ratings);
+          if (withPhotos.savedWeeks)              setSavedWeeks(withPhotos.savedWeeks);
+          saveAll(merged);
+          setSyncStatus("synced");
+          setTimeout(()=>setSyncStatus("idle"), 2000);
+        }
+      } catch(e) {}
+    }, 30000); // every 30 seconds
+    return () => clearInterval(poll);
   }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(""), 2500); };
