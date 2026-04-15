@@ -1,26 +1,35 @@
 const KEY = "mealhacked:family-data";
+const BASE_URL = () => process.env.DinnerHacks_KV_REST_API_URL?.replace(/\/$/, "");
+const TOKEN    = () => process.env.DinnerHacks_KV_REST_API_TOKEN;
+ 
+function headers() {
+  return {
+    Authorization: `Bearer ${TOKEN()}`,
+    "Content-Type": "application/json",
+  };
+}
  
 async function redisGet() {
-  const url = `${process.env.DinnerHacks_KV_REST_API_URL}/get/${KEY}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${process.env.DinnerHacks_KV_REST_API_TOKEN}` },
-  });
+  const res = await fetch(`${BASE_URL()}/get/${KEY}`, { headers: headers() });
   const json = await res.json();
   if (!json.result) return null;
-  try { return JSON.parse(json.result); } catch { return json.result; }
+  // Upstash returns the value as a string — parse it
+  try { return typeof json.result === "string" ? JSON.parse(json.result) : json.result; }
+  catch { return null; }
 }
  
 async function redisSet(data) {
-  const url = `${process.env.DinnerHacks_KV_REST_API_URL}/set/${KEY}`;
-  await fetch(url, {
+  // Correct Upstash REST syntax: POST /set/KEY with value as body string
+  // EX (expiry) passed as query param
+  const THIRTY_DAYS = 60 * 60 * 24 * 30;
+  const res = await fetch(`${BASE_URL()}/set/${KEY}?EX=${THIRTY_DAYS}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.DinnerHacks_KV_REST_API_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    // Set 30-day expiry so stale data auto-clears
-    body: JSON.stringify([JSON.stringify(data), "EX", 60 * 60 * 24 * 30]),
+    headers: headers(),
+    body: JSON.stringify(JSON.stringify(data)), // value must be a JSON-encoded string
   });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error);
+  return json;
 }
  
 export default async function handler(req, res) {
@@ -30,19 +39,21 @@ export default async function handler(req, res) {
  
   if (req.method === "OPTIONS") return res.status(200).end();
  
-  // Not configured — fall back to localStorage silently
-  if (!process.env.DinnerHacks_KV_REST_API_URL || !process.env.DinnerHacks_KV_REST_API_TOKEN) {
-    return res.status(200).json({ fallback: true, reason: "KV not configured" });
+  if (!BASE_URL() || !TOKEN()) {
+    return res.status(200).json({ fallback: true, reason: "KV env vars not set" });
   }
  
   try {
     if (req.method === "GET") {
       const data = await redisGet();
-      if (!data) return res.status(200).json({ fallback: true, reason: "No data yet" });
-      return res.status(200).json({ data });
+      if (!data) return res.status(200).json({ fallback: true, reason: "No data in Redis yet" });
+      return res.status(200).json({ ok: true, data });
     }
  
     if (req.method === "POST") {
+      if (!req.body || typeof req.body !== "object") {
+        return res.status(400).json({ error: "Invalid body" });
+      }
       await redisSet(req.body);
       return res.status(200).json({ ok: true });
     }
