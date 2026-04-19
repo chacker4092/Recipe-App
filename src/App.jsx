@@ -608,54 +608,37 @@ function attachPhotos(data) {
   };
 }
 
-// ── Merge logic — combines data from two devices ──
-// Recipes: union by id (both devices keep all recipes)
-// Plan: most recent non-null day wins
-// Ratings: merge, higher star wins
+// ── Merge logic ──
+// SERVER = source of truth for plan/skipped/portions/ratings/savedWeeks
+// RECIPES = union of both (both phones can add recipes, neither loses them)
 function mergeData(local, remote) {
   if (!local && !remote) return {};
   if (!local) return remote;
   if (!remote) return local;
 
-  // Merge recipes: union by id
+  // Recipes: union by id — never lose a recipe from either device
   const recipeMap = {};
+  // Remote first, then local overwrites (local has photos attached)
   [...(remote.myRecipes || []), ...(local.myRecipes || [])].forEach(r => {
-    if (r && r.id) recipeMap[r.id] = r; // local wins on conflict (has photos)
+    if (r?.id) recipeMap[r.id] = r;
   });
 
-  // Merge plan: for each day, keep whichever has a meal (non-null)
-  // If both have a meal, local wins (most recently touched device)
-  const plan = {};
-  const allDays = new Set([
-    ...Object.keys(local.plan || {}),
-    ...Object.keys(remote.plan || {}),
-  ]);
-  allDays.forEach(day => {
-    const l = (local.plan || {})[day];
-    const r = (remote.plan || {})[day];
-    plan[day] = l !== undefined ? l : r; // local wins
-  });
+  // Everything else: remote (server) wins — it's the shared source of truth
+  // This ensures both phones see the same plan, skip notes, ratings etc.
+  const remoteTs = remote.updatedAt || 0;
+  const localTs  = local.updatedAt  || 0;
 
-  // Merge skippedDays: local wins
-  const skippedDays = { ...(remote.skippedDays || {}), ...(local.skippedDays || {}) };
-
-  // Merge ratings: higher star wins
-  const ratings = { ...(remote.ratings || {}) };
-  Object.entries(local.ratings || {}).forEach(([name, r]) => {
-    if (!ratings[name] || r.stars >= ratings[name].stars) ratings[name] = r;
-  });
-
-  // Merge saved weeks: union
-  const savedWeeks = { ...(remote.savedWeeks || {}), ...(local.savedWeeks || {}) };
+  // Use whichever is newer for plan/skipped/portions
+  const useRemote = remoteTs >= localTs;
 
   return {
-    myRecipes: Object.values(recipeMap),
-    plan,
-    skippedDays,
-    ratings,
-    savedWeeks,
-    portionSizes: { ...(remote.portionSizes || {}), ...(local.portionSizes || {}) },
-    updatedAt: Date.now(),
+    myRecipes:    Object.values(recipeMap),
+    plan:         useRemote ? (remote.plan         || local.plan         || {}) : (local.plan         || remote.plan         || {}),
+    skippedDays:  useRemote ? (remote.skippedDays  || local.skippedDays  || {}) : (local.skippedDays  || remote.skippedDays  || {}),
+    portionSizes: useRemote ? (remote.portionSizes || local.portionSizes || {}) : (local.portionSizes || remote.portionSizes || {}),
+    ratings:      useRemote ? (remote.ratings      || local.ratings      || {}) : (local.ratings      || remote.ratings      || {}),
+    savedWeeks:   { ...(local.savedWeeks || {}), ...(remote.savedWeeks || {}) },
+    updatedAt:    Math.max(localTs, remoteTs),
   };
 }
 
@@ -1513,21 +1496,28 @@ export default function MealPlanner() {
       return false;
     };
 
-    // 1. Load local data immediately (synchronous, no flash)
+    // 1. Load local cache immediately so screen isn't blank
     const local = loadAll() || {};
     const hadLocalPlan = applyData(local);
 
-    // 2. Fetch from server and MERGE with local (both devices contribute)
+    // 2. Fetch from server — server is source of truth
     syncPull().then(remote => {
-      if (remote) {
-        // Merge: union of recipes + local plan wins day-by-day
+      if (remote && Object.keys(remote).length > 0) {
+        // Merge: server wins for plan/dates, union for recipes
         const merged = mergeData(local, remote);
-        applyData(merged);
-        saveAll(merged);       // save merged result locally
-        syncPush(merged);      // push merged result back to server
+        applyData(merged);   // update UI with merged data
+        saveAll(merged);     // cache locally for offline use
+        // Only push back if we added new recipes the server didn't have
+        const localRecipeIds  = new Set((local.myRecipes  || []).map(r => r.id));
+        const remoteRecipeIds = new Set((remote.myRecipes || []).map(r => r.id));
+        const hasNewRecipes   = [...localRecipeIds].some(id => !remoteRecipeIds.has(id));
+        if (hasNewRecipes) syncPush(merged);
       } else if (!hadLocalPlan) {
-        // No data anywhere — true first launch
+        // Nothing on server and nothing local — true first launch
         generateWeek(false);
+      } else if (hadLocalPlan && !remote) {
+        // We have local data but server is empty — push to server so other device can get it
+        syncPush(local);
       }
       hasLoadedRef.current = true;
     }).catch(() => {
@@ -1592,34 +1582,42 @@ export default function MealPlanner() {
       .catch(() => setSyncStatus("error"));
   }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
 
-  // Poll server every 30s so both phones stay in sync while app is open
+  // Poll server every 20s so both phones stay in sync while app is open
+  // Use a ref for current state so the interval always has fresh values
+  const stateRef = useRef({});
+  stateRef.current = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes };
+
   useEffect(()=>{
     const poll = setInterval(async () => {
       if (!hasLoadedRef.current) return;
       try {
         const remote = await syncPull();
-        if (!remote) return;
-        const local = { savedWeeks, myRecipes, ratings, plan, skippedDays, portionSizes };
+        if (!remote || !Object.keys(remote).length) return;
+        const local = stateRef.current;
         const localTs  = local.updatedAt  || 0;
         const remoteTs = remote.updatedAt || 0;
-        // Only update if server has newer data than what we last saved
-        if (remoteTs > localTs) {
+        // Apply if server has newer data OR has recipes we don't have
+        const remoteIds = new Set((remote.myRecipes || []).map(r => r.id));
+        const localIds  = new Set((local.myRecipes  || []).map(r => r.id));
+        const serverHasNewRecipes = [...remoteIds].some(id => !localIds.has(id));
+        if (remoteTs > localTs || serverHasNewRecipes) {
           const merged = mergeData(local, remote);
           const withPhotos = attachPhotos(merged);
-          if (withPhotos.myRecipes?.length)       setMyRecipes(withPhotos.myRecipes);
-          if (withPhotos.plan)                    setPlan(withPhotos.plan);
-          if (withPhotos.skippedDays)             setSkippedDays(withPhotos.skippedDays);
-          if (withPhotos.portionSizes)            setPortionSizes(withPhotos.portionSizes);
-          if (withPhotos.ratings)                 setRatings(withPhotos.ratings);
-          if (withPhotos.savedWeeks)              setSavedWeeks(withPhotos.savedWeeks);
+          // Update all state
+          setMyRecipes(withPhotos.myRecipes    || []);
+          setPlan(withPhotos.plan              || {});
+          setSkippedDays(withPhotos.skippedDays|| {});
+          setPortionSizes(withPhotos.portionSizes || {});
+          setRatings(withPhotos.ratings        || {});
+          setSavedWeeks(withPhotos.savedWeeks  || {});
           saveAll(merged);
           setSyncStatus("synced");
           setTimeout(()=>setSyncStatus("idle"), 2000);
         }
       } catch(e) {}
-    }, 30000); // every 30 seconds
+    }, 20000); // every 20 seconds
     return () => clearInterval(poll);
-  }, [plan, skippedDays, portionSizes, savedWeeks, myRecipes, ratings]);
+  }, []); // empty deps — interval runs once, reads fresh state via stateRef
 
   const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(""), 2500); };
 
