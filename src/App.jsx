@@ -660,11 +660,21 @@ function loadAll() {
 // ── Server sync ──
 async function syncPush(data) {
   try {
-    // Never push photos — too large for Upstash
+    // Strip photos only from plan meals (can be large), keep recipe library photos
+    // Recipe photos are stored as base64 which is fine at ~50KB each
+    const safe = {
+      ...data,
+      plan: Object.fromEntries(
+        Object.entries(data.plan || {}).map(([d, m]) =>
+          [d, m ? { ...m, photoDataUrl: null } : m]
+        )
+      ),
+      updatedAt: Date.now(),
+    };
     await fetch(SYNC_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...stripPhotosDeep(data), updatedAt: Date.now() }),
+      body: JSON.stringify(safe),
     });
   } catch(e) {}
 }
@@ -2369,69 +2379,70 @@ export default function MealPlanner() {
                   {filtered.map(meal=>{
               const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
               const isAssignedToPickDay = pickForDay && plan[pickForDay]?.id === meal.id;
+              // Placeholder image background using method color
+              const imgSrc = meal.photoDataUrl || null;
               return(
                 <div key={meal.id}
-                  onClick={undefined}
-                  style={{background:isAssignedToPickDay?A.tealSoft:A.surface,borderRadius:14,padding:"14px 16px",marginBottom:8,
+                  style={{background:isAssignedToPickDay?A.tealSoft:A.surface,borderRadius:14,
+                    marginBottom:8,overflow:"hidden",
                     border:`1px solid ${isAssignedToPickDay?A.teal:pickForDay?A.teal+"44":A.border}`,
-                    boxShadow:"0 1px 3px rgba(0,0,0,0.05)",
-                    cursor:pickForDay?"pointer":"default",
-                    transition:"all 0.15s"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div style={{flex:1,cursor:"pointer"}} onClick={()=>setViewRecipe(meal)}>
-                      <div style={{fontWeight:600,fontSize:14,color:A.textPrimary,lineHeight:1.3,marginBottom:6}}>{meal.name}</div>
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                        <Pill color={meta.color} bg={meta.bg}>{meta.emoji} {meta.label}</Pill>
-                        {meal.cuisine&&<Pill color="#6B7A8A" bg="#EEF0F3">{meal.cuisine}</Pill>}
-                        {meal.toddlerFriendly&&<Pill color={A.amber} bg="#FFF8E6">🐣</Pill>}
-                        {meal.source==="custom"&&<Pill color={A.teal} bg={A.tealSoft}>🔗</Pill>}
-                        {meal.cookTime&&<Pill color={A.textMuted} bg={A.surface3}>⏱ {meal.cookTime}</Pill>}
+                    boxShadow:"0 1px 3px rgba(0,0,0,0.05)",transition:"all 0.15s"}}>
+                  <div style={{display:"flex",alignItems:"stretch"}}>
+                    {/* Left — recipe image or color swatch */}
+                    <div onClick={()=>setViewRecipe(meal)}
+                      style={{width:88,minHeight:88,flexShrink:0,cursor:"pointer",
+                        background:imgSrc?"transparent":meta.bg,
+                        display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+                      {imgSrc
+                        ? <img src={imgSrc} alt={meal.name}
+                            style={{width:88,height:"100%",minHeight:88,objectFit:"cover",display:"block"}}/>
+                        : <span style={{fontSize:36}}>{meta.emoji}</span>
+                      }
+                    </div>
+                    {/* Right — name, tags, actions */}
+                    <div style={{flex:1,padding:"12px 12px 10px",display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
+                      <div onClick={()=>setViewRecipe(meal)} style={{cursor:"pointer",marginBottom:6}}>
+                        <div style={{fontWeight:700,fontSize:13,color:A.textPrimary,lineHeight:1.3,marginBottom:5}}>{meal.name}</div>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          <Pill color={meta.color} bg={meta.bg} size={10}>{meta.emoji} {meta.label}</Pill>
+                          {meal.cuisine&&<Pill color="#6B7A8A" bg="#EEF0F3" size={10}>{meal.cuisine}</Pill>}
+                          {meal.toddlerFriendly&&<Pill color={A.amber} bg="#FFF8E6" size={10}>🐣</Pill>}
+                          {meal.cookTime&&<Pill color={A.textMuted} bg={A.surface3} size={10}>⏱ {meal.cookTime}</Pill>}
+                        </div>
+                      </div>
+                      {/* Actions row */}
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {!pickForDay&&(
+                          <>
+                            <button onClick={()=>setViewRecipe(meal)}
+                              style={{flex:1,background:A.surface3,border:`1px solid ${A.border}`,borderRadius:7,
+                                padding:"5px 0",cursor:"pointer",fontSize:11,fontWeight:600,color:A.textSecondary}}>
+                              View
+                            </button>
+                            <button onClick={e=>{e.stopPropagation();
+                                if(window.confirm(`Remove "${meal.name}"?`)) deleteRecipe(meal.id);}}
+                              style={{background:"transparent",border:`1px solid ${A.red}33`,borderRadius:7,
+                                padding:"5px 8px",cursor:"pointer",fontSize:11,color:A.red}}>
+                              🗑
+                            </button>
+                          </>
+                        )}
+                        {pickForDay&&(
+                          <>
+                            <button onClick={e=>{e.stopPropagation();setViewRecipe(meal);}}
+                              style={{flex:1,background:A.surface3,border:`1px solid ${A.border}`,borderRadius:7,
+                                padding:"5px 0",cursor:"pointer",fontSize:11,fontWeight:600,color:A.textSecondary}}>
+                              View →
+                            </button>
+                            <button onClick={e=>{e.stopPropagation();swapManual(pickForDay,meal);setPickForDay(null);setTab("plan");}}
+                              style={{flex:1,background:A.teal,border:"none",borderRadius:7,padding:"5px 0",
+                                cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff"}}>
+                              + Add
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
-                    {/* Day chips — only show when NOT in pick mode */}
-                    {!pickForDay&&(
-                    <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:12}}>
-                      <div style={{display:"flex",gap:3,flexWrap:"wrap",maxWidth:160,justifyContent:"flex-end"}}>
-                        {DAYS.map(d=>{
-                          const isAssigned = plan[d]?.id === meal.id;
-                          return (
-                          <button key={d} onClick={()=>swapManual(d,meal)}
-                            title={isAssigned ? `Assigned to ${d}` : `Assign to ${d}`}
-                            style={{background:isAssigned?A.teal:A.surface3,
-                              color:isAssigned?"#fff":A.textMuted,
-                              border:`1px solid ${isAssigned?A.teal:A.border}`,
-                              borderRadius:4,padding:"3px 5px",cursor:"pointer",
-                              fontSize:9,fontWeight:700,lineHeight:1.2,transition:"all 0.15s"}}>
-                            {d.slice(0,2)}
-                          </button>
-                        )})}
-                      </div>
-                      <button onClick={e=>{e.stopPropagation();
-                          if (window.confirm(`Remove "${meal.name}" from your library?`)) deleteRecipe(meal.id);
-                        }}
-                        style={{background:A.surface3,color:A.red,border:`1px solid ${A.red}44`,
-                          borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>
-                        🗑 Remove
-                      </button>
-                    </div>
-                    )}
-                    {/* In pick mode — View and Add as equal stacked buttons */}
-                    {pickForDay&&(
-                      <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:12,flexShrink:0}}>
-                        <button onClick={e=>{e.stopPropagation();setViewRecipe(meal);}}
-                          style={{background:A.surface3,border:`1px solid ${A.border}`,borderRadius:8,
-                            padding:"6px 11px",cursor:"pointer",fontSize:11,fontWeight:600,
-                            color:A.textSecondary,whiteSpace:"nowrap",width:"100%"}}>
-                          View →
-                        </button>
-                        <button onClick={e=>{e.stopPropagation(); swapManual(pickForDay,meal); setPickForDay(null); setTab("plan");}}
-                          style={{background:A.teal,border:"none",borderRadius:8,padding:"6px 11px",
-                            cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff",
-                            whiteSpace:"nowrap",width:"100%"}}>
-                          + Add
-                        </button>
-                      </div>
-                    )}
                   </div>
                 </div>
               );
