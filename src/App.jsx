@@ -204,7 +204,41 @@ function fmtQty(n) {
 }
 
 // Units must match as whole words to avoid "l" matching "lemon", "g" matching "garlic"
-const UNIT_RE = /^(lbs?|oz|cups?|tbsps?|tsps?|kg|ml|cans?|bunche?s?|cloves?|sprigs?|packets?|slices?|stalks?|fillets?|heads?|pieces?|pounds?|ounces?)/i;
+const UNIT_RE = /^(lbs?|oz|cups?|tbsps?|tsps?|kg|ml|cans?|bunche?s?|cloves?|sprigs?|packets?|slices?|stalks?|fillets?|heads?|pieces?|pounds?|ounces?)/i;
+
+// ── FIX: normalizeUnit was called but never defined — added here ──
+// Also normalises plurals (lbs→lb, cups→cup, cloves→clove) and case
+// so the same ingredient from two different recipes always gets the same key.
+function normalizeUnit(u) {
+  if (!u) return "";
+  u = u.toLowerCase().trim();
+  if (/^lbs?$|^pounds?$/.test(u))        return "lb";
+  if (/^oz$|^ounces?$/.test(u))          return "oz";
+  if (/^cups?$/.test(u))                 return "cup";
+  if (/^tbsps?$|^tablespoons?$/.test(u)) return "tbsp";
+  if (/^tsps?$|^teaspoons?$/.test(u))    return "tsp";
+  if (/^cans?$/.test(u))                 return "can";
+  if (/^bunche?s?$/.test(u))             return "bunch";
+  if (/^cloves?$/.test(u))               return "clove";
+  if (/^sprigs?$/.test(u))               return "sprig";
+  if (/^packets?$/.test(u))              return "packet";
+  if (/^slices?$/.test(u))               return "slice";
+  if (/^stalks?$/.test(u))               return "stalk";
+  if (/^fillets?$/.test(u))              return "fillet";
+  if (/^heads?$/.test(u))                return "head";
+  if (/^pieces?$/.test(u))               return "piece";
+  return u;
+}
+
+// ── FIX: strip trailing plural "s" from ingredient names so
+// "sweet potato" and "sweet potatoes" share the same grocery key.
+// Only strips words >=5 chars to avoid mangling short names like "peas".
+function normalizeName(name) {
+  return name
+    .replace(/\b(\w{4,})s\b/g, (_, stem) => stem)
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function parseIngredient(raw) {
   let s = raw.trim();
@@ -212,19 +246,23 @@ function parseIngredient(raw) {
   const qtyMatch = s.match(/^([\d.\s\/⅛¼⅓⅜½⅝⅔¾⅞]+)/);
   let qty = 0;
   if (qtyMatch) { qty = parseQty(qtyMatch[1]); s = s.slice(qtyMatch[1].length).trim(); }
-  // 2. Pull unit (whole-word only)
+  // 2. Pull unit (whole-word only) — normalizeUnit is now defined above
   const unitMatch = s.match(UNIT_RE);
   let unit = "";
   if (unitMatch) { unit = normalizeUnit(unitMatch[1]); s = s.slice(unitMatch[1].length).trim(); }
   // 3. Clean name: strip parentheticals, prep words, leading punctuation
   let name = s.replace(/\(.*?\)/g,"").replace(/^[,.\s]+/,"").replace(/,.*$/,"").toLowerCase().trim();
-  name = name.replace(/(diced|minced|sliced|chopped|cubed|shredded|grated|trimmed|peeled|halved|quartered|crushed|cooked|drained|rinsed|thawed|softened|melted|boneless|skinless|bone-in|low.sodium|unsalted|whole|fresh|dried|large|medium|small|about|each|to serve|for serving)/gi,"")
+  name = name.replace(/(diced|minced|sliced|chopped|cubed|shredded|grated|trimmed|peeled|halved|quartered|crushed|cooked|drained|rinsed|thawed|softened|melted|boneless|skinless|bone-in|low.sodium|unsalted|whole|fresh|dried|large|medium|small|about|each|to serve|for serving)/gi,"")
              .replace(/\s+/g," ").trim();
+  // 4. Normalise plural names so "chicken thighs" and "chicken thigh" combine
+  name = normalizeName(name);
   return { qty, unit, name };
 }
 
 function ingredientKey(raw) {
   const { unit, name } = parseIngredient(raw);
+  return `${unit}|${name}`;
+} = parseIngredient(raw);
   return `${unit}|${name}`;
 }
 
