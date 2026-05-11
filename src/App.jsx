@@ -262,8 +262,6 @@ function parseIngredient(raw) {
 function ingredientKey(raw) {
   const { unit, name } = parseIngredient(raw);
   return `${unit}|${name}`;
-} = parseIngredient(raw);
-  return `${unit}|${name}`;
 }
 
 function buildGroceriesWithPortions(plan, portionSizes = {}) {
