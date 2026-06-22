@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 
 // ─── Design System — Alexa Light Mode ────────────────────────────────────────
 const A = {
@@ -52,75 +51,16 @@ const METHOD_META = {
   other:    { label:"Other",       emoji:"🍴", color:"#5A6A7A", bg:"#EDF0F3" },
 };
 
-// Grocery categories — display order (the categoriser below decides which one an item lands in)
-const GROCERY_CAT_ORDER = [
-  "🥩 Meat & Protein",
-  "🥦 Produce",
-  "🥛 Dairy",
-  "🧂 Spices & Seasonings",
-  "🥫 Pantry",
-  "❄️ Frozen",
-  "🛒 Other",
+// Grocery categories for grouping
+const GROCERY_CATS = [
+  { name:"🥩 Meat & Protein",   test: i => /chicken|turkey|salmon|beef|pork|shrimp|tuna|fish|lamb|sausage|bacon|egg|tofu/i.test(i) },
+  { name:"🥦 Produce",          test: i => /broccoli|carrot|celery|onion|pepper|tomato|spinach|kale|zucchini|potato|sweet potato|asparagus|corn|lettuce|cabbage|mushroom|lemon|lime|avocado|apple|berry|garlic|rosemary|thyme|basil|cilantro|parsley|scallion|ginger|jalape/i.test(i) },
+  { name:"🥛 Dairy",            test: i => /milk|cheese|butter|cream|yogurt|parmesan|mozzarella|cheddar/i.test(i) },
+  { name:"🌿 Herbs & Spices",   test: i => /tsp|tbsp|teaspoon|tablespoon|paprika|cumin|oregano|chili powder|chili flake|cayenne|coriander|turmeric|cinnamon|italian seasoning|garlic powder|onion powder|smoked|mustard powder|bay leaf|red pepper|black pepper|white pepper|dried|seasoning|spice|herb/i.test(i) },
+  { name:"🥫 Pantry",           test: i => /broth|stock|can |canned|beans|pasta|rice|noodle|breadcrumb|flour|cornstarch|oil|soy sauce|honey|ketchup|mustard|vinegar|sauce|dressing|mayo|tomato paste|coconut milk|bread|cracker|wrap|tortilla/i.test(i) },
+  { name:"❄️ Frozen",           test: i => /frozen/i.test(i) },
+  { name:"🛒 Other",            test: () => true },
 ];
-
-// Categorise a grocery item by its raw text (keeps qualifiers like "fresh"/"frozen"/"canned"
-// that the cleaned name strips out). Checks run most-specific → least-specific so that
-// "garlic powder" / "onion powder" / "black pepper" don't get grabbed by the broad Produce
-// rule, and "tsp/tbsp" measurements no longer drag oils into the spice bucket.
-function categorizeGrocery(raw) {
-  const s = (raw || "").toLowerCase();
-  const has = (re) => re.test(s);
-
-  // 1) FROZEN — frozen aisle wins regardless of what the item is
-  if (has(/\bfrozen\b/)) return "❄️ Frozen";
-
-  // 2) Fresh herbs & always-fresh produce — claimed before the dried-spice rules below
-  if (has(/\bfresh\b/) && has(/\b(rosemary|thyme|basil|sage|oregano|cilantro|parsley|dill|mint|chives|tarragon|scallions?|green onions?)\b/)) return "🥦 Produce";
-  if (has(/\b(cilantro|parsley|scallions?|green onions?|chives)\b/)) return "🥦 Produce";
-
-  // 3) SPICES & SEASONINGS — dried spices, powders, salt & pepper, seasoning blends
-  if (
-    has(/\b(salt|kosher salt|sea salt|garlic salt|celery salt)\b/) ||
-    has(/\b(black|white|ground|cracked|lemon)\s+pepper\b/) ||
-    has(/\bpeppercorns?\b/) ||
-    has(/\bred pepper flakes?\b/) || has(/\bcrushed red pepper\b/) ||
-    has(/\b(garlic|onion|chil[il]|chile|curry|mustard|cocoa|ginger|chipotle)\s+powder\b/) ||
-    has(/\bground\s+(ginger|cloves?|mustard|coriander|cumin|cinnamon|nutmeg|allspice|pepper|turmeric|cardamom|fennel|sage|thyme)\b/) ||
-    has(/\b(paprika|cumin|oregano|cayenne|coriander|turmeric|cinnamon|nutmeg|allspice|cardamom|bay leaf|bay leaves|chili flakes?|chili powder|italian seasoning|taco seasoning|chili seasoning|cajun|old bay|garam masala|five spice|seasoning|spice blend|vanilla extract)\b/) ||
-    has(/\bdried\s+(oregano|basil|thyme|rosemary|sage|parsley|dill|mint|herbs?)\b/) ||
-    has(/\b(oregano|thyme|rosemary|sage|basil|bay leaf)\b/)
-  ) return "🧂 Spices & Seasonings";
-
-  // 4) PANTRY — canned/jarred/bottled goods, dry goods, oils, condiments, sauces, baking.
-  //    Checked before Produce/Dairy so "canned tomatoes", "tomato sauce", "coconut milk",
-  //    "chili garlic sauce", "peanut butter", "chicken broth" route correctly.
-  if (
-    has(/\bcan(s|ned)?\b/) || has(/\bjarred?\b/) || has(/\bbottle[ds]?\b/) ||
-    has(/\b(broth|stock|bouillon)\b/) ||
-    has(/\bsauce\b/) ||
-    has(/\b(tomato (paste|sauce|puree)|diced tomatoes|crushed tomatoes)\b/) ||
-    has(/\b(kidney|black|pinto|cannellini|garbanzo|navy|refried|baked|white)\s*beans?\b/) || has(/\bchick ?peas?\b/) || has(/\blentils?\b/) ||
-    has(/\b(pasta|spaghetti|penne|noodles?|macaroni|elbow|rice|quinoa|couscous|orzo)\b/) ||
-    has(/\b(flour|cornstarch|corn starch|breadcrumbs?|panko|baking (soda|powder)|sugar|brown sugar|honey|maple syrup|molasses)\b/) ||
-    has(/\boils?\b/) || has(/\bvinegar\b/) ||
-    has(/\b(ketchup|mustard|mayo|mayonnaise|dressing|salsa|relish|pesto|aminos)\b/) ||
-    has(/\b(coconut|almond|oat|soy|rice)\s+milk\b/) ||
-    has(/\b(peanut|almond|cashew|sun ?flower)\s+butter\b/) ||
-    has(/\b(bread|crackers?|wrap|tortillas?|pita|bun|roll)\b/) ||
-    has(/\b(jam|jelly|preserves)\b/)
-  ) return "🥫 Pantry";
-
-  // 5) DAIRY (non-dairy milks & nut butters already routed to Pantry above)
-  if (has(/\b(milk|cheese|butter|cream|yogurt|yoghurt|parmesan|mozzarella|cheddar|ricotta|feta|gouda|provolone|half and half|half-and-half|buttermilk|ghee|kefir)\b/)) return "🥛 Dairy";
-
-  // 6) MEAT & PROTEIN ("chicken broth" & "egg noodles" already routed to Pantry above)
-  if (has(/\b(chicken|turkey|beef|steak|pork|bacon|ham|sausage|salmon|tuna|cod|tilapia|halibut|shrimp|prawns?|fish|lamb|veal|bison|chorizo|prosciutto|pepperoni|tofu|tempeh|seitan)\b/) || has(/\beggs?\b/)) return "🥩 Meat & Protein";
-
-  // 7) PRODUCE — fresh fruit, vegetables, and remaining fresh aromatics
-  if (has(/\b(broccoli|carrots?|celery|onions?|shallots?|garlic|ginger|pepper|tomato|tomatoes|spinach|kale|arugula|lettuce|cabbage|zucchini|squash|eggplant|potato|potatoes|asparagus|corn|mushrooms?|cucumber|avocado|lemon|lime|orange|apple|banana|berr(y|ies)|strawberr|grape|melon|mango|pineapple|peach|pear|cauliflower|brussels|green beans?|peas|leek|fennel|radish|beet|turnip|jalape|serrano|poblano|habanero|chile)\b/)) return "🥦 Produce";
-
-  return "🛒 Other";
-}
 
 // ─── Seed Meals (with full amounts on every ingredient) ───────────────────────
 const SEED_MEALS = [
@@ -263,63 +203,8 @@ function fmtQty(n) {
   return r===Math.floor(r) ? String(Math.floor(r)) : r.toFixed(2).replace(/\.?0+$/,"");
 }
 
-// Canonicalise a unit so "lb"/"lbs"/"pound"/"pounds" combine, "tbsp"/"tablespoon" combine, etc.
-// Returns a single lowercase canonical token used both for the dedup key and for display.
-function normalizeUnit(u) {
-  if (!u) return "";
-  const x = u.toLowerCase().replace(/\.$/, "").trim();
-  const map = {
-    lb:"lb", lbs:"lb", pound:"lb", pounds:"lb",
-    oz:"oz", ounce:"oz", ounces:"oz",
-    cup:"cup", cups:"cup",
-    tbsp:"tbsp", tbsps:"tbsp", tablespoon:"tbsp", tablespoons:"tbsp",
-    tsp:"tsp", tsps:"tsp", teaspoon:"tsp", teaspoons:"tsp",
-    kg:"kg", ml:"ml",
-    can:"can", cans:"can",
-    bunch:"bunch", bunches:"bunch", bunchs:"bunch", bunche:"bunch",
-    clove:"clove", cloves:"clove",
-    sprig:"sprig", sprigs:"sprig",
-    packet:"packet", packets:"packet",
-    slice:"slice", slices:"slice",
-    stalk:"stalk", stalks:"stalk",
-    fillet:"fillet", fillets:"fillet",
-    head:"head", heads:"head",
-    piece:"piece", pieces:"piece",
-  };
-  return map[x] || x;
-}
-
-// Singularise the LAST word so "carrots"/"carrot" and "thighs"/"thigh" dedupe to one line.
-// Guards against words that merely end in s (asparagus, hummus) so they aren't mangled.
-function singularize(word) {
-  if (!word) return word;
-  if (/(ss|us|is|ous)$/.test(word)) return word;
-  if (/ies$/.test(word)) return word.replace(/ies$/, "y");
-  if (/(ch|sh|x|z)es$/.test(word)) return word.replace(/es$/, "");
-  if (/oes$/.test(word)) return word.replace(/oes$/, "o");
-  if (/s$/.test(word)) return word.replace(/s$/, "");
-  return word;
-}
-
-// Normalise an ingredient NAME for the dedup key (singularise the last word).
-function normalizeName(name) {
-  if (!name) return "";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length) parts[parts.length - 1] = singularize(parts[parts.length - 1]);
-  return parts.join(" ");
-}
-
-// Pretty-print a unit for display, pluralising countable units when qty != 1.
-const UNIT_PLURALS = { cup:"cups", can:"cans", clove:"cloves", sprig:"sprigs", packet:"packets",
-  slice:"slices", stalk:"stalks", fillet:"fillets", head:"heads", piece:"pieces", bunch:"bunches" };
-function displayUnit(unit, qty) {
-  if (!unit) return "";
-  if (qty !== 1 && UNIT_PLURALS[unit]) return UNIT_PLURALS[unit];
-  return unit;
-}
-
 // Units must match as whole words to avoid "l" matching "lemon", "g" matching "garlic"
-const UNIT_RE = /^(lbs?|oz|cups?|tbsps?|tsps?|kg|ml|cans?|bunche?s?|cloves?|sprigs?|packets?|slices?|stalks?|fillets?|heads?|pieces?|pounds?|ounces?)\b/i;
+const UNIT_RE = /^(lbs?|oz|cups?|tbsps?|tsps?|kg|ml|cans?|bunche?s?|cloves?|sprigs?|packets?|slices?|stalks?|fillets?|heads?|pieces?|pounds?|ounces?)/i;
 
 function parseIngredient(raw) {
   let s = raw.trim();
@@ -327,23 +212,20 @@ function parseIngredient(raw) {
   const qtyMatch = s.match(/^([\d.\s\/⅛¼⅓⅜½⅝⅔¾⅞]+)/);
   let qty = 0;
   if (qtyMatch) { qty = parseQty(qtyMatch[1]); s = s.slice(qtyMatch[1].length).trim(); }
-  // 1b. Drop a leftover range remainder, e.g. "1-2 jalapeños" → keep "jalapeños"
-  s = s.replace(/^(?:[-–—]|to)\s*[\d.\/]+\s*/i, "").trim();
   // 2. Pull unit (whole-word only)
   const unitMatch = s.match(UNIT_RE);
   let unit = "";
   if (unitMatch) { unit = normalizeUnit(unitMatch[1]); s = s.slice(unitMatch[1].length).trim(); }
   // 3. Clean name: strip parentheticals, prep words, leading punctuation
   let name = s.replace(/\(.*?\)/g,"").replace(/^[,.\s]+/,"").replace(/,.*$/,"").toLowerCase().trim();
-  name = name.replace(/\b(diced|minced|sliced|chopped|cubed|shredded|grated|trimmed|peeled|halved|quartered|crushed|cooked|drained|rinsed|thawed|softened|melted|boneless|skinless|bone-in|low.sodium|unsalted|whole|fresh|dried|large|medium|small|about|each|to serve|for serving)\b/gi,"")
+  name = name.replace(/(diced|minced|sliced|chopped|cubed|shredded|grated|trimmed|peeled|halved|quartered|crushed|cooked|drained|rinsed|thawed|softened|melted|boneless|skinless|bone-in|low.sodium|unsalted|whole|fresh|dried|large|medium|small|about|each|to serve|for serving)/gi,"")
              .replace(/\s+/g," ").trim();
   return { qty, unit, name };
 }
 
-// Dedup key: normalised unit + singularised name, so "2 carrots" and "1 carrot" merge.
 function ingredientKey(raw) {
   const { unit, name } = parseIngredient(raw);
-  return `${unit}|${normalizeName(name)}`;
+  return `${unit}|${name}`;
 }
 
 function buildGroceriesWithPortions(plan, portionSizes = {}) {
@@ -354,11 +236,10 @@ function buildGroceriesWithPortions(plan, portionSizes = {}) {
     const mult = portionSizes[day] || 1;
     m.groceries.forEach(raw => {
       const { qty, unit, name } = parseIngredient(raw);
-      if (!name) return;
-      const key = `${unit}|${normalizeName(name)}`;
+      const key = ingredientKey(raw);
+      if (!key || !name) return;
       const scaledQty = qty * mult;
       if (!acc[key]) {
-        // keep the first raw + cleaned name for display/categorisation
         acc[key] = { qty: scaledQty, unit, name, rawName: raw };
       } else {
         acc[key].qty += scaledQty;
@@ -367,27 +248,26 @@ function buildGroceriesWithPortions(plan, portionSizes = {}) {
     });
   });
 
-  // Format and categorise — display order fixed by GROCERY_CAT_ORDER
+  // Format and categorise
   const categorised = {};
-  GROCERY_CAT_ORDER.forEach(name => { categorised[name] = []; });
+  GROCERY_CATS.forEach(cat => { categorised[cat.name] = []; });
 
   Object.values(acc).forEach(({ qty, unit, name, rawName }) => {
     let label;
     if (qty === 0) {
-      label = name || rawName;                                  // no numeric qty — show name
+      // No numeric quantity — show cleaned name
+      label = name || rawName;
     } else {
-      const u = displayUnit(unit, qty);
-      label = u ? `${fmtQty(qty)} ${u} ${name}` : `${fmtQty(qty)} ${name}`;
+      label = unit ? `${fmtQty(qty)} ${unit} ${name}` : `${fmtQty(qty)} ${name}`;
     }
-    label = label.replace(/\s+/g, " ").trim();
+    label = label.trim();
     if (!label) return;
-    // Categorise on the original raw text so qualifiers (fresh/frozen/canned) are preserved
-    const cat = categorizeGrocery(rawName) || "🛒 Other";
-    (categorised[cat] || categorised["🛒 Other"]).push(label);
+    const cat = GROCERY_CATS.find(c => c.test(label));
+    categorised[cat.name].push(label);
   });
 
   Object.keys(categorised).forEach(k => {
-    categorised[k].sort((a, b) => a.localeCompare(b));
+    categorised[k].sort();
     if (categorised[k].length === 0) delete categorised[k];
   });
   return categorised;
@@ -1843,58 +1723,6 @@ export default function MealPlanner() {
     }
   };
 
-  // Skipped / "eating out" day — mirrors the normal day card chrome (same surface, day label,
-  // ⇅ Swap header button, and action column) with an inline editable field where the meal name
-  // would normally sit. `hasMeal` decides whether Restore returns to a meal or to an empty slot.
-  const renderSkipCard = (day, { hasMeal }) => {
-    const selected = swapSelectDay === day;
-    const dimmed = swapSelectDay && swapSelectDay !== day;
-    return (
-      <div key={day}
-        style={{background:A.surface,borderRadius:18,padding:16,marginBottom:12,
-          border:`2px solid ${selected?A.teal:swapSelectDay?A.teal+"55":A.border}`,
-          boxShadow:selected?`0 0 0 3px ${A.teal}33`:"0 1px 4px rgba(0,0,0,0.07)",
-          opacity:dimmed?0.7:1,transition:"all 0.15s"}}>
-        {/* Header row — day label + Swap, identical to normal cards */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-          <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:700}}>{day}</div>
-          <button onClick={()=>handleDayTap(day)}
-            style={{background:selected?A.teal:A.surface3,border:`1px solid ${selected?A.teal:A.border}`,
-              borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,
-              color:selected?"#fff":A.textMuted,transition:"all 0.15s"}}>
-            {selected?"✓ Selected":"⇅ Swap"}
-          </button>
-        </div>
-        {/* Body row — name slot becomes an editable field; action column holds Restore */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div style={{flex:1,paddingRight:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <span style={{fontSize:20,flexShrink:0}}>🥡</span>
-              <input
-                value={skippedDays[day] || ""}
-                onChange={e=>setSkippedDays(p=>({...p,[day]:e.target.value}))}
-                placeholder="Freezer meal, takeout, leftovers…"
-                style={{flex:1,minWidth:0,background:"transparent",border:"none",
-                  borderBottom:`1.5px solid ${A.border}`,padding:"3px 0",
-                  fontSize:16,fontWeight:700,color:A.textPrimary,outline:"none",fontFamily:"inherit"}}
-              />
-            </div>
-            <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-              <Pill color={A.textSecondary} bg={A.surface3}>🍽 Eating out / freezer</Pill>
-            </div>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
-            <button onClick={()=>setSkippedDays(p=>({...p,[day]:false}))}
-              style={{background:A.surface3,border:`1px solid ${A.border}`,borderRadius:8,padding:"6px 11px",
-                cursor:"pointer",fontSize:11,color:A.teal,fontWeight:600,whiteSpace:"nowrap"}}>
-              ↩ Restore
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const saveWeek = () => {
     if (!saveName.trim()) return;
     const updated = { ...savedWeeks, [saveName.trim()]: { plan, savedAt: new Date().toLocaleDateString() }};
@@ -2167,44 +1995,89 @@ export default function MealPlanner() {
                 {DAYS.map(day=>{
                   const meal=plan[day];
 
-                  // ── Empty day (Start From Scratch cleared this day) ──
-                  if (!meal) {
-                    // Skipped/eating-out → show the same card as planned skip days
-                    if (skippedDays[day]!==undefined && skippedDays[day]!==false)
-                      return renderSkipCard(day, { hasMeal:false });
-                    // Otherwise a dashed "nothing planned yet" placeholder
-                    return (
+                  // ── Empty card (Start From Scratch cleared this day) ──
+                  if (!meal) return (
                     <div key={day} style={{background:A.surface,borderRadius:18,padding:16,marginBottom:12,
                       border:`2px dashed ${A.border}`,boxShadow:"none"}}>
                       <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>{day}</div>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      {/* If this day has been skipped via the empty card, show the skip input */}
+                      {skippedDays[day]!==undefined && skippedDays[day]!==false ? (
                         <div style={{display:"flex",alignItems:"center",gap:10}}>
-                          <span style={{fontSize:22}}>🍽️</span>
-                          <div style={{fontSize:13,fontWeight:600,color:A.textMuted}}>No meal planned</div>
-                        </div>
-                        <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
-                          <button onClick={()=>{ setPickForDay(day); setTab("library"); }}
-                            style={{background:A.tealSoft,border:`1px solid ${A.teal}44`,borderRadius:8,
-                              padding:"6px 11px",cursor:"pointer",fontSize:11,color:A.teal,fontWeight:700,whiteSpace:"nowrap"}}>
-                            + Add
+                          <span style={{fontSize:22,flexShrink:0}}>🥡</span>
+                          <input
+                            value={skippedDays[day]||""}
+                            onChange={e=>{
+                              const updated = {...skippedDays,[day]:e.target.value};
+                              setSkippedDays(updated);
+                              saveAll({savedWeeks,myRecipes,ratings,plan,skippedDays:updated,portionSizes});
+                            }}
+                            placeholder="What are you ordering? (e.g. Hai Chinese)"
+                            style={{flex:1,background:A.surface3,border:`1px solid ${A.border}`,borderRadius:10,
+                              padding:"9px 12px",fontSize:13,color:A.textPrimary,outline:"none",fontFamily:"inherit"}}
+                          />
+                          <button onClick={()=>setSkippedDays(p=>({...p,[day]:false}))}
+                            style={{background:"transparent",border:"none",cursor:"pointer",
+                              fontSize:11,color:A.teal,fontWeight:600,whiteSpace:"nowrap"}}>
+                            ↩ Undo
                           </button>
-                          <button onClick={()=>setSkippedDays(p=>({...p,[day]:""}))}
-                            style={{background:"transparent",border:`1px solid ${A.border}`,borderRadius:8,
-                              padding:"6px 11px",cursor:"pointer",fontSize:11,color:A.textMuted,fontWeight:500,whiteSpace:"nowrap"}}>
-                            🥡 Skip
-                          </button>
                         </div>
-                      </div>
+                      ) : (
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            <span style={{fontSize:22}}>🍽️</span>
+                            <div style={{fontSize:13,fontWeight:600,color:A.textMuted}}>No meal planned</div>
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
+                            <button onClick={()=>{ setPickForDay(day); setTab("library"); }}
+                              style={{background:A.tealSoft,border:`1px solid ${A.teal}44`,borderRadius:8,
+                                padding:"6px 11px",cursor:"pointer",fontSize:11,color:A.teal,fontWeight:700,whiteSpace:"nowrap"}}>
+                              + Add
+                            </button>
+                            <button onClick={()=>setSkippedDays(p=>({...p,[day]:""}))}
+                              style={{background:"transparent",border:`1px solid ${A.border}`,borderRadius:8,
+                                padding:"6px 11px",cursor:"pointer",fontSize:11,color:A.textMuted,fontWeight:500,whiteSpace:"nowrap"}}>
+                              🥡 Skip
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    );
-                  }
+                  );
                   const meta=METHOD_META[meal.method]||METHOD_META.sheetpan;
                   const rating=ratings[meal.name];
                   const isSwapping=swappingDay===day;
                   const isSkipped=skippedDays[day] !== undefined && skippedDays[day] !== false;
 
-                  // ── Skipped card (day has a meal but is marked eating-out) ──
-                  if (isSkipped) return renderSkipCard(day, { hasMeal:true });
+                  // ── Skipped card ──
+                  if (isSkipped) return (
+                    <div key={day}
+                      style={{background:A.surface2,borderRadius:18,padding:16,marginBottom:12,
+                        border:`2px solid ${swapSelectDay===day?A.teal:swapSelectDay?A.teal+"44":A.border}`,
+                        boxShadow:swapSelectDay===day?`0 0 0 3px ${A.teal}33`:"0 1px 4px rgba(0,0,0,0.05)",
+                        opacity:swapSelectDay&&swapSelectDay!==day?0.7:1,
+                        transition:"all 0.15s",cursor:swapSelectDay?"pointer":"default"}}
+                      onClick={()=>swapSelectDay&&swapSelectDay!==day&&handleDayTap(day)}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                        <div style={{fontSize:10,color:A.textMuted,letterSpacing:2,textTransform:"uppercase",fontWeight:700}}>{day}</div>
+                        <button onClick={()=>setSkippedDays(p=>({...p,[day]:false}))}
+                          style={{background:"transparent",border:"none",padding:"2px 6px",
+                            cursor:"pointer",fontSize:11,color:A.teal,fontWeight:600}}>
+                          ↩ Restore
+                        </button>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:22,flexShrink:0}}>🥡</span>
+                        <input
+                          value={skippedDays[day] || ""}
+                          onChange={e=>setSkippedDays(p=>({...p,[day]:e.target.value}))}
+                          placeholder="What are you ordering? (e.g. Hai Chinese)"
+                          style={{flex:1,background:A.surface,border:`1px solid ${A.border}`,borderRadius:10,
+                            padding:"9px 12px",fontSize:13,color:A.textPrimary,outline:"none",
+                            fontFamily:"inherit"}}
+                        />
+                      </div>
+                    </div>
+                  );
 
                   // ── Normal card ──
                   const portion = portionSizes[day] || 1;
@@ -2584,25 +2457,19 @@ export default function MealPlanner() {
       </div>
 
       {/* ── BOTTOM NAV ── */}
-      {/* Rendered via a portal to <body> so it can never be trapped by a transform/filter
-          on an ancestor (e.g. on #root in index.html), which would drop a position:fixed
-          element into the middle of the page instead of pinning it to the viewport bottom. */}
-      {typeof document !== "undefined" && createPortal(
-        <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,
-          background:A.surface,borderTop:`1px solid ${A.border}`,display:"flex",zIndex:500,
-          paddingBottom:"env(safe-area-inset-bottom,0)",boxShadow:"0 -2px 12px rgba(0,0,0,0.08)",fontFamily:FONT}}>
-          {NAV.map(({id,icon,label})=>(
-            <button key={id} onClick={()=>setTab(id)}
-              style={{flex:1,padding:"10px 6px 12px",border:"none",background:"transparent",cursor:"pointer",
-                display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-              <span style={{fontSize:22}}>{icon}</span>
-              <span style={{fontSize:10,fontWeight:tab===id?700:400,color:tab===id?A.teal:A.textMuted,letterSpacing:0.3}}>{label}</span>
-              {tab===id&&<div style={{width:24,height:3,background:A.teal,borderRadius:2,marginTop:2}}/>}
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,
+        background:A.surface,borderTop:`1px solid ${A.border}`,display:"flex",zIndex:500,
+        paddingBottom:"env(safe-area-inset-bottom,0)",boxShadow:"0 -2px 12px rgba(0,0,0,0.08)"}}>
+        {NAV.map(({id,icon,label})=>(
+          <button key={id} onClick={()=>setTab(id)}
+            style={{flex:1,padding:"10px 6px 12px",border:"none",background:"transparent",cursor:"pointer",
+              display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+            <span style={{fontSize:22}}>{icon}</span>
+            <span style={{fontSize:10,fontWeight:tab===id?700:400,color:tab===id?A.teal:A.textMuted,letterSpacing:0.3}}>{label}</span>
+            {tab===id&&<div style={{width:24,height:3,background:A.teal,borderRadius:2,marginTop:2}}/>}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
