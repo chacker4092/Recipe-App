@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Component } from "react";
 
 // ─── Design System — Alexa Light Mode ────────────────────────────────────────
 const A = {
@@ -51,16 +51,6 @@ const METHOD_META = {
   other:    { label:"Other",       emoji:"🍴", color:"#5A6A7A", bg:"#EDF0F3" },
 };
 
-// Grocery categories for grouping
-const GROCERY_CATS = [
-  { name:"🥩 Meat & Protein",   test: i => /chicken|turkey|salmon|beef|pork|shrimp|tuna|fish|lamb|sausage|bacon|egg|tofu/i.test(i) },
-  { name:"🥦 Produce",          test: i => /broccoli|carrot|celery|onion|pepper|tomato|spinach|kale|zucchini|potato|sweet potato|asparagus|corn|lettuce|cabbage|mushroom|lemon|lime|avocado|apple|berry|garlic|rosemary|thyme|basil|cilantro|parsley|scallion|ginger|jalape/i.test(i) },
-  { name:"🥛 Dairy",            test: i => /milk|cheese|butter|cream|yogurt|parmesan|mozzarella|cheddar/i.test(i) },
-  { name:"🌿 Herbs & Spices",   test: i => /tsp|tbsp|teaspoon|tablespoon|paprika|cumin|oregano|chili powder|chili flake|cayenne|coriander|turmeric|cinnamon|italian seasoning|garlic powder|onion powder|smoked|mustard powder|bay leaf|red pepper|black pepper|white pepper|dried|seasoning|spice|herb/i.test(i) },
-  { name:"🥫 Pantry",           test: i => /broth|stock|can |canned|beans|pasta|rice|noodle|breadcrumb|flour|cornstarch|oil|soy sauce|honey|ketchup|mustard|vinegar|sauce|dressing|mayo|tomato paste|coconut milk|bread|cracker|wrap|tortilla/i.test(i) },
-  { name:"❄️ Frozen",           test: i => /frozen/i.test(i) },
-  { name:"🛒 Other",            test: () => true },
-];
 
 // ─── Seed Meals (with full amounts on every ingredient) ───────────────────────
 const SEED_MEALS = [
@@ -182,7 +172,7 @@ function scaleIngredient(text, mult) {
 }
 // ─── Grocery math helpers ────────────────────────────────────────────────────
 
-const UNI_FRACS = {"⅛":0.125,"¼":0.25,"⅓":0.333,"⅜":0.375,"½":0.5,"⅝":0.625,"⅔":0.667,"¾":0.75,"⅞":0.875};
+const UNI_FRACS = {"⅛":0.125,"¼":0.25,"⅓":1/3,"⅜":0.375,"½":0.5,"⅝":0.625,"⅔":2/3,"¾":0.75,"⅞":0.875};
 
 function parseQty(s) {
   if (!s) return 0;
@@ -196,18 +186,85 @@ function parseQty(s) {
 
 function fmtQty(n) {
   if (!n) return "";
-  const FRACS = [[0.125,"⅛"],[0.25,"¼"],[0.333,"⅓"],[0.375,"⅜"],[0.5,"½"],[0.625,"⅝"],[0.667,"⅔"],[0.75,"¾"],[0.875,"⅞"]];
+  const FRACS = [[0.125,"⅛"],[0.25,"¼"],[1/3,"⅓"],[0.375,"⅜"],[0.5,"½"],[0.625,"⅝"],[2/3,"⅔"],[0.75,"¾"],[0.875,"⅞"]];
   const whole = Math.floor(n), frac = n - whole;
   for (const [v,s] of FRACS) if (Math.abs(frac-v)<0.04) return whole>0?`${whole} ${s}`:s;
   const r = Math.round(n*100)/100;
   return r===Math.floor(r) ? String(Math.floor(r)) : r.toFixed(2).replace(/\.?0+$/,"");
 }
 
+// Canonicalize a unit token to a standard short form.
+// (This was previously CALLED but never DEFINED — the missing definition threw a
+//  ReferenceError inside buildGroceriesWithPortions and white-screened the app.)
+const UNIT_ALIASES = {
+  lb:"lb", lbs:"lb", pound:"lb", pounds:"lb",
+  oz:"oz", ounce:"oz", ounces:"oz",
+  g:"g", gram:"g", grams:"g", kg:"kg", kilogram:"kg", kilograms:"kg",
+  ml:"ml", milliliter:"ml", milliliters:"ml", l:"l", liter:"l", liters:"l", litre:"l", litres:"l",
+  tsp:"tsp", tsps:"tsp", teaspoon:"tsp", teaspoons:"tsp",
+  tbsp:"tbsp", tbsps:"tbsp", tablespoon:"tbsp", tablespoons:"tbsp",
+  cup:"cup", cups:"cup",
+  can:"can", cans:"can", clove:"clove", cloves:"clove", sprig:"sprig", sprigs:"sprig",
+  packet:"packet", packets:"packet", slice:"slice", slices:"slice",
+  stalk:"stalk", stalks:"stalk", fillet:"fillet", fillets:"fillet",
+  head:"head", heads:"head", piece:"piece", pieces:"piece",
+  bunch:"bunch", bunches:"bunch",
+};
+function normalizeUnit(u) {
+  if (!u) return "";
+  return UNIT_ALIASES[u.toLowerCase()] || u.toLowerCase();
+}
+
+// Dimensions + conversion to a canonical base unit (weight→grams, volume→millilitres).
+// Count units (clove, can, bunch, bare count) stay discrete — a clove ≠ a can — and
+// are keyed individually so they never get summed together.
+const WEIGHT_TO_G  = { g:1, kg:1000, oz:28.3495, lb:453.592 };
+const VOLUME_TO_ML = { ml:1, l:1000, tsp:4.92892, tbsp:14.7868, cup:236.588 };
+const METRIC_UNITS = new Set(["g","kg","ml","l"]);
+
+function unitDimension(u) {
+  if (WEIGHT_TO_G[u]  != null) return "weight";
+  if (VOLUME_TO_ML[u] != null) return "volume";
+  return "count";
+}
+
+// Simple English pluralization for display ("2 onions", "8 cloves")
+function pluralize(word) {
+  if (!word) return word;
+  if (/(tomato|potato)$/i.test(word)) return word+"es";
+  if (/[^aeiou]y$/i.test(word))       return word.slice(0,-1)+"ies";
+  if (/(s|x|z|ch|sh)$/i.test(word))   return word+"es";
+  return word+"s";
+}
+
+// Singularize only the LAST word so "carrots"/"carrot" and "chicken thighs"/"chicken thigh" merge
+function singularizeLast(name) {
+  const parts = name.split(" ");
+  let w = parts[parts.length-1];
+  if (w.length > 3 && !/ss$/i.test(w)) {
+    if (/ies$/i.test(w))                  w = w.slice(0,-3)+"y";
+    else if (/(tomato|potato)es$/i.test(w)) w = w.slice(0,-2);
+    else if (/s$/i.test(w))               w = w.slice(0,-1);
+  }
+  parts[parts.length-1] = w;
+  return parts.join(" ");
+}
+
+const NAME_SYNONYMS = {
+  "scallion":"green onion", "spring onion":"green onion",
+  "garbanzo":"chickpea", "garbanzo bean":"chickpea",
+};
+function normalizeName(name) {
+  let n = singularizeLast(name.trim());
+  if (NAME_SYNONYMS[n]) n = NAME_SYNONYMS[n];
+  return n;
+}
+
 // Units must match as whole words to avoid "l" matching "lemon", "g" matching "garlic"
-const UNIT_RE = /^(lbs?|oz|cups?|tbsps?|tsps?|kg|ml|cans?|bunche?s?|cloves?|sprigs?|packets?|slices?|stalks?|fillets?|heads?|pieces?|pounds?|ounces?)/i;
+const UNIT_RE = /^(lbs?|pounds?|oz|ounces?|kg|kilograms?|g|grams?|ml|milliliters?|l|liters?|litres?|cups?|tbsps?|tablespoons?|tsps?|teaspoons?|cans?|bunche?s?|cloves?|sprigs?|packets?|slices?|stalks?|fillets?|heads?|pieces?)\b/i;
 
 function parseIngredient(raw) {
-  let s = raw.trim();
+  let s = String(raw || "").trim();
   // 1. Pull leading quantity
   const qtyMatch = s.match(/^([\d.\s\/⅛¼⅓⅜½⅝⅔¾⅞]+)/);
   let qty = 0;
@@ -215,21 +272,57 @@ function parseIngredient(raw) {
   // 2. Pull unit (whole-word only)
   const unitMatch = s.match(UNIT_RE);
   let unit = "";
-  if (unitMatch) { unit = normalizeUnit(unitMatch[1]); s = s.slice(unitMatch[1].length).trim(); }
-  // 3. Clean name: strip parentheticals, prep words, leading punctuation
+  if (unitMatch) { unit = normalizeUnit(unitMatch[1]); s = s.slice(unitMatch[0].length).trim(); }
+  // 3. Clean name: strip parentheticals, prep words, leading punctuation, then normalize
   let name = s.replace(/\(.*?\)/g,"").replace(/^[,.\s]+/,"").replace(/,.*$/,"").toLowerCase().trim();
-  name = name.replace(/(diced|minced|sliced|chopped|cubed|shredded|grated|trimmed|peeled|halved|quartered|crushed|cooked|drained|rinsed|thawed|softened|melted|boneless|skinless|bone-in|low.sodium|unsalted|whole|fresh|dried|large|medium|small|about|each|to serve|for serving)/gi,"")
+  name = name.replace(/\b(diced|minced|sliced|chopped|cubed|shredded|grated|trimmed|peeled|halved|quartered|crushed|cooked|drained|rinsed|thawed|softened|melted|boneless|skinless|bone-in|low.sodium|reduced.sodium|unsalted|whole|fresh|dried|large|medium|small|ripe|about|each|to serve|for serving|to taste|divided)\b/gi,"")
              .replace(/\s+/g," ").trim();
+  name = normalizeName(name);
   return { qty, unit, name };
 }
 
 function ingredientKey(raw) {
-  const { unit, name } = parseIngredient(raw);
-  return `${unit}|${name}`;
+  const { qty, unit, name } = parseIngredient(raw);
+  if (!name) return "";
+  if (qty === 0) return `noqty|${name}`;
+  const dim = unitDimension(unit);
+  if (dim === "count") return `count|${unit || "each"}|${name}`;
+  return `${dim}|${name}`; // weight & volume merge across their own units
+}
+
+// Turn a summed base quantity back into a friendly grocery-store unit
+function formatMeasured(dim, baseQty, metric) {
+  if (dim === "weight") {
+    if (metric) return baseQty >= 1000 ? `${fmtQty(baseQty/1000)} kg` : `${fmtQty(baseQty)} g`;
+    return baseQty >= 453.592 ? `${fmtQty(baseQty/453.592)} lb` : `${fmtQty(baseQty/28.3495)} oz`;
+  }
+  // volume
+  if (metric) return baseQty >= 1000 ? `${fmtQty(baseQty/1000)} l` : `${fmtQty(baseQty)} ml`;
+  if (baseQty >= 59.15) { const v = baseQty/236.588; return `${fmtQty(v)} ${Math.abs(v-1)<0.04?"cup":"cups"}`; } // ≥ ¼ cup
+  if (baseQty >= 7.39)   return `${fmtQty(baseQty/14.7868)} tbsp`;  // ≥ ½ tbsp
+  return `${fmtQty(baseQty/4.92892)} tsp`;
+}
+
+// Categorize by NAME only (never the qty/unit), specific → generic, mutually exclusive.
+// Pantry runs before Meat/Dairy so "chicken broth", "egg noodles" and "coconut milk"
+// don't get mis-shelved by a substring match.
+const CAT_TESTS = [
+  { name:"🥫 Pantry",         re:/broth|stock|beans?\b|lentil|chickpea|pasta|noodle|\brice\b|breadcrumb|flour|cornstarch|\boil\b|soy sauce|coconut aminos|honey|maple|ketchup|vinegar|\bsauce\b|salsa|dressing|mayo|tomato paste|coconut milk|cracker|\bwrap\b|tortilla|\bbread\b|sugar|oats?\b|quinoa|couscous/i },
+  { name:"🌿 Herbs & Spices", re:/\bsalt\b|black pepper|white pepper|red pepper flake|paprika|cumin|oregano|chili powder|chili flake|cayenne|coriander|turmeric|cinnamon|nutmeg|italian seasoning|taco seasoning|chili seasoning|garlic powder|onion powder|mustard powder|bay leaf|seasoning|\bspice\b|extract|vanilla/i },
+  { name:"🥩 Meat & Protein", re:/chicken|turkey|beef|steak|\bpork\b|\bham\b|salmon|shrimp|tuna|\bfish\b|lamb|sausage|bacon|tofu|ground |thigh|breast|meatball/i },
+  { name:"🥛 Dairy",          re:/milk|cheese|butter|\bcream\b|yogurt|yoghurt|parmesan|mozzarella|cheddar|feta|ricotta/i },
+  { name:"🥦 Produce",        re:/broccoli|carrot|celery|onion|pepper|tomato|spinach|kale|zucchini|potato|asparagus|\bcorn\b|lettuce|cabbage|mushroom|lemon|lime|avocado|apple|berry|garlic|rosemary|thyme|basil|cilantro|parsley|scallion|ginger|jalape|cucumber|squash|green bean|\bpea\b/i },
+  { name:"🛒 Other",          re:/.*/ },
+];
+function categoryFor(name, unit, rawName) {
+  if (/frozen/i.test(rawName)) return "❄️ Frozen";
+  if (unit === "can")          return "🥫 Pantry";
+  const hit = CAT_TESTS.find(c => c.re.test(name));
+  return hit ? hit.name : "🛒 Other";
 }
 
 function buildGroceriesWithPortions(plan, portionSizes = {}) {
-  const acc = {}; // key → { qty, unit, name, rawName }
+  const acc = {}; // key → aggregation bucket
 
   Object.entries(plan).forEach(([day, m]) => {
     if (!m?.groceries) return;
@@ -238,37 +331,49 @@ function buildGroceriesWithPortions(plan, portionSizes = {}) {
       const { qty, unit, name } = parseIngredient(raw);
       const key = ingredientKey(raw);
       if (!key || !name) return;
-      const scaledQty = qty * mult;
+      const scaled = qty * mult;
       if (!acc[key]) {
-        acc[key] = { qty: scaledQty, unit, name, rawName: raw };
-      } else {
-        acc[key].qty += scaledQty;
-        if (!acc[key].unit && unit) acc[key].unit = unit;
+        acc[key] = {
+          name, unit, rawName: raw,
+          dim: qty === 0 ? "noqty" : unitDimension(unit),
+          metric: METRIC_UNITS.has(unit),
+          baseQty: 0, count: 0,
+        };
       }
+      const b = acc[key];
+      if (METRIC_UNITS.has(unit)) b.metric = true;
+      if      (b.dim === "weight") b.baseQty += scaled * (WEIGHT_TO_G[unit]  || 1);
+      else if (b.dim === "volume") b.baseQty += scaled * (VOLUME_TO_ML[unit] || 1);
+      else if (b.dim === "count")  b.count   += scaled;
+      // noqty: nothing to sum, we just keep the name
     });
   });
 
-  // Format and categorise
   const categorised = {};
-  GROCERY_CATS.forEach(cat => { categorised[cat.name] = []; });
-
-  Object.values(acc).forEach(({ qty, unit, name, rawName }) => {
+  Object.values(acc).forEach(b => {
     let label;
-    if (qty === 0) {
-      // No numeric quantity — show cleaned name
-      label = name || rawName;
+    if (b.dim === "noqty") {
+      label = b.name;
+    } else if (b.dim === "count") {
+      const q = b.count;
+      if (!b.unit || b.unit === "each") {
+        label = `${fmtQty(q)} ${q !== 1 ? pluralize(b.name) : b.name}`;
+      } else {
+        const u = q !== 1 ? pluralize(b.unit) : b.unit;
+        label = `${fmtQty(q)} ${u} ${b.name}`;
+      }
     } else {
-      label = unit ? `${fmtQty(qty)} ${unit} ${name}` : `${fmtQty(qty)} ${name}`;
+      label = `${formatMeasured(b.dim, b.baseQty, b.metric)} ${b.name}`;
     }
-    label = label.trim();
+    label = label.trim().replace(/\s+/g," ");
     if (!label) return;
-    const cat = GROCERY_CATS.find(c => c.test(label));
-    categorised[cat.name].push(label);
+    const cat = categoryFor(b.name, b.unit, b.rawName);
+    (categorised[cat] = categorised[cat] || []).push(label);
   });
 
   Object.keys(categorised).forEach(k => {
-    categorised[k].sort();
-    if (categorised[k].length === 0) delete categorised[k];
+    categorised[k] = [...new Set(categorised[k])].sort(); // dedupe + sort
+    if (!categorised[k].length) delete categorised[k];
   });
   return categorised;
 }
@@ -347,6 +452,38 @@ function extractJSON(raw) {
   }
 }
 
+// A recipe object is only usable if it actually has a name, ingredients and steps.
+function validateMeal(m) {
+  return !!(m && typeof m === "object"
+    && typeof m.name === "string" && m.name.trim()
+    && Array.isArray(m.ingredients) && m.ingredients.length
+    && Array.isArray(m.instructions) && m.instructions.length);
+}
+
+// Shared extractor used by URL + photo import. Calls Claude, understands the
+// explicit NO_RECIPE signal, validates the result, and does ONE corrective retry
+// before giving up. It NEVER fabricates a recipe on failure — it throws instead.
+async function extractRecipeJSON(messages, maxTokens = 2000) {
+  let text = await callClaude(messages, maxTokens);
+  if (/\bNO_RECIPE\b/i.test(text.slice(0, 40))) {
+    throw new Error("NO_RECIPE");
+  }
+  let meal = null;
+  try { meal = extractJSON(text); } catch(_) { meal = null; }
+  if (!validateMeal(meal)) {
+    const retry = [
+      ...messages,
+      { role: "assistant", content: String(text).slice(0, 1500) },
+      { role: "user", content: "That response was not usable. Reply with ONLY the JSON object for the recipe — no prose, no markdown fences — starting with { and ending with }. Keep every ingredient's exact quantity and unit." },
+    ];
+    text = await callClaude(retry, maxTokens);
+    try { meal = extractJSON(text); } catch(_) { meal = null; }
+  }
+  if (!validateMeal(meal)) throw new Error("PARSE_FAILED");
+  if (!Object.keys(METHOD_META).includes(meal.method)) meal.method = "sheetpan";
+  return meal;
+}
+
 async function fetchAIMeals(excludeNames = []) {
   const prompt = `You are a helpful meal planner. Generate exactly 7 dinner recipes for a family: 2 adults + 1 toddler (age 2-3). Meals must be healthy, mild flavour, easy weeknight-friendly.
 Cooking methods allowed: Crockpot, Sheet Pan, or Instant Pot ONLY.
@@ -400,7 +537,11 @@ Every ingredient must have a quantity and unit.`;
 }
 
 async function fetchRecipeFromUrl(url) {
-  // Step 1: Fetch the actual page content via Vercel proxy
+  // Step 1: Fetch the actual page content via the Vercel proxy.
+  // Ideal path: the proxy extracts schema.org/Recipe JSON-LD and returns
+  //   { text, source: "structured" }. If it only returns stripped page text,
+  //   source will be "html". Either way we work from REAL page content —
+  //   we never invent a recipe from the URL slug.
   let pageText = "";
   let pageSource = "";
   try {
@@ -411,84 +552,66 @@ async function fetchRecipeFromUrl(url) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fetchUrl: url }),
       });
-      const pageData = await pageRes.json();
-      pageText = pageData.text || "";
-      pageSource = pageData.source || "html";
+      if (pageRes.ok) {
+        const pageData = await pageRes.json();
+        pageText = pageData.text || "";
+        pageSource = pageData.source || "html";
+      }
     }
-  } catch(e) { /* fall through to slug-based */ }
+  } catch(e) { /* pageText stays empty → handled below */ }
 
-  const slug = url.replace(/https?:\/\/[^/]+\//,"").replace(/[^a-z0-9]+/gi," ").trim().slice(0, 100);
-  const hasContent = pageText.length > 150;
-
-  // Step 2: Build prompt based on what we got
-  const exampleJSON = `{"name":"Steak Bites with Sweet Potatoes","method":"sheetpan","toddlerFriendly":true,"protein":"Beef","cookTime":"45 min","servings":4,"ingredients":["1 lb flat iron steak diced into 1 inch pieces","1 large sweet potato diced into 1 inch pieces","3 tbsp olive oil divided","2 cloves garlic minced","2 bell peppers seeded and diced","4 green onions thinly sliced","2 tbsp coconut aminos","2 tsp cracked black pepper","1 tsp sea salt","2 tbsp fresh cilantro chopped"],"instructions":["Microwave diced sweet potato with 1 tsp salt covered 4-6 minutes until just tender.","Heat 2 tbsp oil in skillet over high heat. Sear steak in single layer turning every 2 min until browned, about 10 min. Remove to plate.","Add remaining oil, add sweet potatoes and saute until browned 3-4 min.","Make well in center, add garlic and saute 1 min. Add peppers and scallions, saute 3-4 min.","Return steak to pan, add coconut aminos, toss and cook 1-2 min until liquid evaporates. Top with pepper and cilantro."],"groceries":["1 lb flat iron steak","1 large sweet potato","3 tbsp olive oil","2 garlic cloves","2 bell peppers","4 green onions","2 tbsp coconut aminos","fresh cilantro"]}`;
-
-  let prompt;
-  if (hasContent && pageSource === "structured") {
-    // Best case: we have clean structured JSON-LD data
-    prompt = `Extract this recipe data into the required JSON format. The data is already structured — copy ingredients and instructions EXACTLY as they appear, do not summarize or invent.
-
-RECIPE DATA:
-${pageText.slice(0, 5000)}
-
-Rules:
-- Copy every ingredient exactly with its quantity and unit
-- Copy each instruction step in full detail
-- method must be "crockpot" (slow cooker), "sheetpan" (oven/roasting), "instapot" (pressure cooker), "onepan" (single pan stovetop), "stovetop" (stovetop), or "other"
-- toddlerFriendly: true if mild/simple ingredients, false if spicy or complex
-- groceries should list each ingredient without prep instructions (e.g. "1 lb flat iron steak" not "1 lb flat iron steak, diced into 1-inch pieces")
-- servings must be a plain number
-
-Return ONLY this JSON, nothing else:
-${exampleJSON}`;
-  } else if (hasContent) {
-    // We have HTML-stripped text — guide Claude to find the recipe within it
-    prompt = `Extract the recipe from this webpage text. Find the ingredients list and instructions, then convert to JSON.
-Copy ingredients and steps EXACTLY as written on the page — do not substitute, simplify, or invent ingredients.
-
-WEBPAGE TEXT:
-${pageText.slice(0, 5000)}
-
-Rules:
-- Extract EVERY ingredient with exact quantity and unit as listed on the page
-- Include ALL steps with full detail
-- method: "crockpot", "sheetpan", "instapot", "onepan", "stovetop", or "other"
-- groceries: same ingredients but without prep descriptors
-- servings: plain number
-
-Return ONLY valid JSON, starting with {:
-${exampleJSON}`;
-  } else {
-    // Fallback: generate from URL slug
-    prompt = `Generate a complete family-friendly recipe for: "${slug}"
-Use exact realistic quantities. Method must be "crockpot", "sheetpan", "instapot", "onepan", "stovetop", or "other".
-Return ONLY JSON: ${exampleJSON}`;
+  const hasContent = pageText.trim().length > 150;
+  if (!hasContent) {
+    // No real page content → refuse rather than hallucinate a recipe.
+    throw new Error("Couldn't read that page. Make sure it's a direct recipe page (not a search, category, or paywalled page). You can also snap a photo of the recipe with the Photo tab instead.");
   }
 
-  const text = await callClaude([{ role: "user", content: prompt }], 2000);
+  const exampleJSON = `{"name":"Steak Bites with Sweet Potatoes","method":"sheetpan","toddlerFriendly":true,"protein":"Beef","cookTime":"45 min","servings":4,"ingredients":["1 lb flat iron steak diced into 1 inch pieces","1 large sweet potato diced into 1 inch pieces","3 tbsp olive oil divided","2 cloves garlic minced","2 bell peppers seeded and diced","4 green onions thinly sliced","2 tbsp coconut aminos","2 tsp cracked black pepper","1 tsp sea salt","2 tbsp fresh cilantro chopped"],"instructions":["Microwave diced sweet potato with 1 tsp salt covered 4-6 minutes until just tender.","Heat 2 tbsp oil in skillet over high heat. Sear steak in single layer turning every 2 min until browned, about 10 min. Remove to plate.","Add remaining oil, add sweet potatoes and saute until browned 3-4 min.","Make well in center, add garlic and saute 1 min. Add peppers and scallions, saute 3-4 min.","Return steak to pan, add coconut aminos, toss and cook 1-2 min until liquid evaporates. Top with pepper and cilantro."],"groceries":["1 lb flat iron steak","1 large sweet potato","3 tbsp olive oil","2 garlic cloves","2 bell peppers","4 green onions","2 tbsp coconut aminos","fresh cilantro"]}`;
+
+  const structured = pageSource === "structured";
+  const prompt = `${structured
+      ? "Convert this structured recipe data into the required JSON. Copy the ingredients and instructions EXACTLY — do not summarize, substitute, reorder, or invent anything."
+      : "Find the recipe inside this webpage text and convert it to JSON. Locate the ingredient list and the numbered steps, and copy them EXACTLY as written — do not substitute, simplify, or invent ingredients. If there is no real recipe in the text, reply with exactly: NO_RECIPE"}
+
+${structured ? "RECIPE DATA" : "WEBPAGE TEXT"}:
+${pageText.slice(0, 8000)}
+
+Rules:
+- Copy every ingredient with its exact quantity and unit
+- Include every instruction step in full detail
+- method must be one of: "crockpot", "sheetpan", "instapot", "onepan", "stovetop", "other"
+- groceries: the same ingredients but without prep descriptors (e.g. "1 lb flat iron steak", not "1 lb flat iron steak, diced")
+- servings must be a plain number
+- toddlerFriendly: true if mild/simple, false if spicy or complex
+
+Return ONLY the JSON object (or NO_RECIPE), matching this shape:
+${exampleJSON}`;
+
   let meal;
-  try { meal = extractJSON(text); }
-  catch(e) { throw new Error("Could not parse recipe. Try a direct recipe page URL (not a search or category page)."); }
-  if (!meal?.name) throw new Error("Recipe name missing from response");
-  if (!Object.keys(METHOD_META).includes(meal.method)) meal.method = "sheetpan";
+  try {
+    meal = await extractRecipeJSON([{ role: "user", content: prompt }], 2400);
+  } catch(e) {
+    if (e.message === "NO_RECIPE")
+      throw new Error("Couldn't find a recipe on that page. Try a direct recipe URL, or add it from a photo instead.");
+    throw new Error("Couldn't parse a complete recipe from that page. Please try again or use a different link.");
+  }
   return { ...meal, id: `custom_${Date.now()}`, source: "custom", recipeUrl: url, servings: Number(meal.servings) || 4 };
 }
 
-// Extract visible text from image using a canvas + DOM approach
-async function extractTextFromImage(dataUrl) {
+// Resize an image via canvas so the base64 payload stays small for the vision call.
+// (Renamed from extractTextFromImage — it never did OCR, it just resizes.)
+async function resizeImageForVision(dataUrl) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       try {
         const canvas = document.createElement("canvas");
-        // Scale down large images to keep base64 payload manageable
         const MAX = 1200;
         const scale = Math.min(1, MAX / Math.max(img.width, img.height));
         canvas.width  = Math.round(img.width  * scale);
         canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        // Return resized jpeg base64 (strips prefix)
         const resized = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
         resolve({ base64: resized, mime: "image/jpeg", width: canvas.width, height: canvas.height });
       } catch(e) {
@@ -501,49 +624,36 @@ async function extractTextFromImage(dataUrl) {
 }
 
 async function fetchRecipeFromImage(base64Data, mimeType) {
-  if (!base64Data || base64Data.length < 50) throw new Error("Image data missing — please try again");
+  if (!base64Data || base64Data.length < 50) throw new Error("Image data missing — please try again.");
 
-  // Try vision API first (multimodal message with image block)
   const safeMime = ["image/jpeg","image/png","image/gif","image/webp"].includes(mimeType) ? mimeType : "image/jpeg";
-  const jsonPrompt = `Extract this recipe into JSON. Return ONLY the JSON object, nothing else:
+  const jsonPrompt = `Read the recipe in this image and convert it to JSON. Transcribe the ingredients and steps EXACTLY as written — copy every quantity and unit, and do NOT invent, substitute, or summarise anything. If the image does not contain a readable recipe, reply with exactly: NO_RECIPE
+
+Return ONLY the JSON object (or NO_RECIPE), matching this shape:
 {"name":"Recipe Name","method":"sheetpan","toddlerFriendly":false,"protein":"Chicken","cookTime":"30 min","servings":4,"ingredients":["2 lbs chicken breast","1 tsp salt"],"instructions":["Step 1.","Step 2."],"groceries":["2 lbs chicken breast","1 tsp salt"]}
-Rules: method must be "crockpot","sheetpan", or "instapot". Every ingredient needs quantity+unit. servings is a number. Start response with {`;
+Rules: method must be one of "crockpot", "sheetpan", "instapot", "onepan", "stovetop", "other". Keep each ingredient's quantity and unit. servings is a plain number.`;
 
-  let text = "";
-  let usedVision = false;
+  const messages = [{
+    role: "user",
+    content: [
+      { type: "image", source: { type: "base64", media_type: safeMime, data: base64Data } },
+      { type: "text", text: jsonPrompt },
+    ],
+  }];
 
-  try {
-    text = await callClaude([{
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: safeMime, data: base64Data } },
-        { type: "text", text: jsonPrompt },
-      ],
-    }], 1200);
-    usedVision = true;
-  } catch(visionErr) {
-    // Vision failed — fall through to text-only path
-  }
-
-  // If vision call returned something but it has no JSON, or failed entirely,
-  // fall back to asking Claude to invent a recipe based on image description
-  let hasJSON = text && (text.includes("{") || text.includes("["));
-  if (!hasJSON) {
-    // Text-only fallback: describe what we know and ask Claude to generate
-    const fallbackPrompt = `A user uploaded a recipe photo. Generate a realistic family-friendly dinner recipe for 2 adults + 1 toddler using Crockpot, Sheet Pan, or Instant Pot.
-Return ONLY this JSON (no explanation):
-{"name":"Honey Garlic Chicken Thighs","method":"sheetpan","toddlerFriendly":true,"protein":"Chicken","cookTime":"35 min","servings":4,"ingredients":["2 lbs chicken thighs","3 tbsp honey","2 tbsp soy sauce","3 garlic cloves minced","1 tbsp olive oil"],"instructions":["Preheat oven to 425F.","Mix honey, soy sauce, garlic.","Coat chicken and bake 35 min."],"groceries":["2 lbs chicken thighs","3 tbsp honey","2 tbsp soy sauce","3 garlic cloves","1 tbsp olive oil"]}`;
-    text = await callClaude([{ role: "user", content: fallbackPrompt }], 1000);
-  }
-
+  // Vision-first, with validation + one retry inside extractRecipeJSON.
+  // On any failure we surface an honest error — we NEVER fabricate a recipe
+  // from a photo we couldn't actually read.
   let meal;
   try {
-    meal = extractJSON(text);
+    meal = await extractRecipeJSON(messages, 1600);
   } catch(e) {
-    throw new Error(`Could not parse recipe: ${e.message}`);
+    if (e.message === "NO_RECIPE")
+      throw new Error("Couldn't find a recipe in that photo. Try a clearer, straight-on shot with the ingredients and steps in frame.");
+    if (e.message === "PARSE_FAILED")
+      throw new Error("Couldn't read the recipe from that photo. Try a clearer, straight-on shot with the ingredients and steps in frame.");
+    throw new Error(e.message || "Couldn't read that photo — please try again.");
   }
-  if (!meal || !meal.name) throw new Error("Recipe name missing from response");
-  if (!Object.keys(METHOD_META).includes(meal.method)) meal.method = "sheetpan";
   return { ...meal, id: `photo_${Date.now()}`, source: "custom", recipeUrl: "", servings: Number(meal.servings) || 4 };
 }
 
@@ -1234,7 +1344,7 @@ function AddRecipeModal({ onAdd, onClose }) {
     setLoading(true); setError(""); setPreview(null);
     try {
       // Resize via canvas to reduce payload size, then extract base64
-      const resized = await extractTextFromImage(imgDataUrl);
+      const resized = await resizeImageForVision(imgDataUrl);
       const base64 = resized ? resized.base64 : imgDataUrl.split(",")[1];
       const mime   = resized ? resized.mime   : imgMime;
       if (!base64 || base64.length < 50) throw new Error("Image data is empty — try a different photo.");
@@ -1331,7 +1441,7 @@ function AddRecipeModal({ onAdd, onClose }) {
         {mode==="url"&&!preview&&(
           <>
             <div style={{fontSize:13,color:A.textSecondary,marginBottom:12,lineHeight:1.6}}>
-              Paste a recipe URL — Claude will generate a recipe based on the link.
+              Paste a direct recipe URL — Claude reads the page and pulls in the real ingredients and steps.
             </div>
             <input value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!loading&&extractUrl()}
               placeholder="https://www.allrecipes.com/recipe/..."
@@ -1342,7 +1452,7 @@ function AddRecipeModal({ onAdd, onClose }) {
               style={{width:"100%",marginTop:12,padding:15,background:loading||!url.trim()?A.surface3:A.teal,
                 color:loading||!url.trim()?A.textMuted:"#000",border:"none",borderRadius:12,
                 cursor:loading||!url.trim()?"default":"pointer",fontSize:14,fontWeight:700}}>
-              {loading?"🔍 Generating recipe...":"Extract Recipe"}
+              {loading?"🔍 Reading recipe...":"Extract Recipe"}
             </button>
           </>
         )}
@@ -1437,7 +1547,7 @@ function RateModal({ meal, existing, onSave, onClose }) {
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
-export default function MealPlanner() {
+function MealPlanner() {
   const [plan, setPlan]               = useState({});
   const [groceryCats, setGroceryCats] = useState({});
   const [checked, setChecked]         = useState({});
@@ -2471,5 +2581,43 @@ export default function MealPlanner() {
         ))}
       </div>
     </div>
+  );
+}
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+// Catches any render/effect crash so a bug degrades to a friendly message instead
+// of a white screen. Saved recipes and plan live in localStorage + the server, so
+// a reload recovers everything.
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("MealPlanner crashed:", error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{fontFamily:FONT,maxWidth:480,margin:"0 auto",padding:"64px 24px",
+          textAlign:"center",color:A.textPrimary,minHeight:"100vh",background:A.bg}}>
+          <div style={{fontSize:44,marginBottom:12}}>🍽️</div>
+          <div style={{fontSize:18,fontWeight:700,marginBottom:8}}>Something went sideways</div>
+          <div style={{fontSize:14,color:A.textSecondary,lineHeight:1.6,marginBottom:22}}>
+            The app hit an unexpected error, but your saved recipes and meal plan are safe.
+            Reloading usually clears it.
+          </div>
+          <button onClick={()=>window.location.reload()}
+            style={{background:A.teal,color:"#fff",border:"none",borderRadius:12,
+              padding:"12px 24px",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+            Reload app
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <MealPlanner />
+    </ErrorBoundary>
   );
 }
